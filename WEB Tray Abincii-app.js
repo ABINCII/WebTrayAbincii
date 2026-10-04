@@ -3,7 +3,7 @@ import { loadRuntime } from "@wonderlandengine/api";
 var Constants = {
   ProjectName: "WEB Tray Abincii",
   RuntimeBaseName: "WonderlandRuntime",
-  WebXRRequiredFeatures: ["local"],
+  WebXRRequiredFeatures: ["local", "hit-test"],
   WebXROptionalFeatures: ["local", "hand-tracking", "hit-test"]
 };
 var RuntimeOptions = {

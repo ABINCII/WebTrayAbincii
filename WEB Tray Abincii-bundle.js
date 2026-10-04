@@ -67227,189 +67227,1110 @@ __publicField2(ImageTrackingTarget, "Properties", {
   arCamera: { type: Type.Object }
 });
 
-// js/ModelCarousel.js
+// js/ARMenuManager.js
 import { Component as Component3, Property as Property2 } from "@wonderlandengine/api";
-var ModelCarousel = class extends Component3 {
+var ARMenuManager = class extends Component3 {
   init() {
-    this.models = [];
+    this.products = [];
+    this.filteredProducts = [];
+    this.categories = [];
+    this.currentType = "all";
+    this.currentCategory = "all";
     this.currentIndex = 0;
-    this.products = [
-      {
-        title: "Abacha",
-        description: "African salad with fish.",
-        price: "\u20A618,500"
+    this.currentProduct = null;
+    this.modelPool = /* @__PURE__ */ new Map();
+    this.activeModelRoot = null;
+    this.loading = /* @__PURE__ */ new Set();
+    this.modelRequestId = 0;
+    this.isRotating = false;
+    this.currentScaleFactor = 1;
+    this.zoomSettings = {
+      0.5: {
+        scale: 0.5,
+        fov: 85
       },
-      {
-        title: "Isiewu",
-        description: "Goat head with spice.",
-        price: "\u20A612,900"
+      1: {
+        scale: 1,
+        fov: 60
       },
-      {
-        title: "Cylinda",
-        description: "test item allow it.",
-        price: "\u20A632,000"
+      2: {
+        scale: 2,
+        fov: 75
       }
-    ];
+    };
   }
-  start() {
-    this.models = [this.model0, this.model1, this.model2].filter((m) => m != null);
-    if (this.models.length === 0) {
-      console.warn("model-carousel: no models assigned");
+  async start() {
+    this.createUI();
+    window.arMenu = this;
+    const params = new URLSearchParams(
+      window.location.search
+    );
+    this.restaurantId = params.get("restaurant");
+    this.tableId = params.get("table");
+    if (!this.restaurantId) {
+      console.error(
+        "ARMenuManager: No restaurant ID found in URL."
+      );
+      this.setStatus(
+        "No restaurant ID was provided."
+      );
       return;
     }
-    this.currentIndex = Math.max(0, Math.min(this.startIndex, this.models.length - 1));
-    this.showOnly(this.currentIndex);
-    this.createUI();
-    this.updateProductInfo();
+    console.log(
+      "Restaurant:",
+      this.restaurantId
+    );
+    console.log(
+      "Table:",
+      this.tableId
+    );
+    this.setZoom(1);
+    await this.fetchMenu(this.restaurantId);
+    this.buildCategories();
+    this.applyFilters();
+    if (this.filteredProducts.length > 0) {
+      this.showProduct(0);
+    } else {
+      this.setStatus(
+        "No menu items were found."
+      );
+    }
   }
+  /* =========================================
+   * FETCH MENU
+   * ========================================= */
+  async fetchMenu(restaurantId) {
+    try {
+      this.setStatus("Loading menu...");
+      const url = `${this.apiBase}/restaurants/menu?restaurant=${encodeURIComponent(restaurantId)}`;
+      console.log(
+        "Fetching menu:",
+        url
+      );
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(
+          `HTTP ${response.status}`
+        );
+      }
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(
+          "Backend returned success=false"
+        );
+      }
+      const meals = (data.meal || []).map((meal) => ({
+        type: "meal",
+        id: meal._id,
+        name: meal.mealName || "Unnamed Meal",
+        desc: meal.desc || "",
+        price: meal.price,
+        category: meal.category || "Uncategorized",
+        img: meal.mealImg || "",
+        raw: meal
+      }));
+      const drinks = (data.drink || []).map((drink) => ({
+        type: "drink",
+        id: drink._id,
+        name: drink.drinkName || "Unnamed Drink",
+        desc: drink.desc || "",
+        price: drink.price,
+        category: drink.category || "Uncategorized",
+        img: drink.drinkImg || "",
+        raw: drink
+      }));
+      this.products = [
+        ...meals,
+        ...drinks
+      ];
+      console.log(
+        `Loaded ${this.products.length} products`
+      );
+      this.setStatus("");
+    } catch (error) {
+      console.error(
+        "ARMenuManager: Failed to fetch menu:",
+        error
+      );
+      this.products = [];
+      this.setStatus(
+        "Unable to load menu."
+      );
+    }
+  }
+  /* =========================================
+   * CATEGORY GENERATION
+   * ========================================= */
+  buildCategories() {
+    const categorySet = /* @__PURE__ */ new Set();
+    for (const product of this.products) {
+      if (product.category) {
+        categorySet.add(product.category);
+      }
+    }
+    this.categories = [
+      "all",
+      ...Array.from(categorySet).sort()
+    ];
+  }
+  /* =========================================
+   * FILTERING
+   * ========================================= */
+  applyFilters() {
+    this.filteredProducts = this.products.filter((product) => {
+      const typeMatches = this.currentType === "all" || product.type === this.currentType;
+      const categoryMatches = this.currentCategory === "all" || product.category === this.currentCategory;
+      return typeMatches && categoryMatches;
+    });
+    this.currentIndex = 0;
+    this.updateFilterUI();
+    this.updateUI();
+  }
+  setType(type) {
+    this.currentType = type;
+    this.currentCategory = "all";
+    this.applyFilters();
+    if (this.filteredProducts.length > 0) {
+      this.showProduct(0);
+    } else {
+      this.hideActiveModel();
+      this.currentProduct = null;
+      this.updateUI();
+    }
+  }
+  setCategory(category) {
+    this.currentCategory = category;
+    this.applyFilters();
+    if (this.filteredProducts.length > 0) {
+      this.showProduct(0);
+    } else {
+      this.hideActiveModel();
+      this.currentProduct = null;
+      this.updateUI();
+    }
+  }
+  /* =========================================
+   * NEXT / PREVIOUS
+   * ========================================= */
+  next() {
+    if (this.filteredProducts.length === 0) {
+      return;
+    }
+    this.currentIndex = (this.currentIndex + 1) % this.filteredProducts.length;
+    this.showProduct(
+      this.currentIndex
+    );
+  }
+  prev() {
+    if (this.filteredProducts.length === 0) {
+      return;
+    }
+    this.currentIndex = (this.currentIndex - 1 + this.filteredProducts.length) % this.filteredProducts.length;
+    this.showProduct(
+      this.currentIndex
+    );
+  }
+  /* =========================================
+   * SHOW PRODUCT
+   * ========================================= */
+  async showProduct(index) {
+    if (this.filteredProducts.length === 0) {
+      return;
+    }
+    index = Math.max(
+      0,
+      Math.min(
+        index,
+        this.filteredProducts.length - 1
+      )
+    );
+    this.currentIndex = index;
+    this.currentProduct = this.filteredProducts[index];
+    this.updateUI();
+    this.hideActiveModel();
+    this.hideImageFallback();
+    const requestId = ++this.modelRequestId;
+    const product = this.currentProduct;
+    const nameKey = this.sanitizeName(product.name);
+    const cached = this.modelPool.get(nameKey);
+    if (cached) {
+      if (requestId !== this.modelRequestId) {
+        return;
+      }
+      cached.root.active = true;
+      this.activeModelRoot = cached.root;
+      this.placeModel(
+        cached.root
+      );
+      this.applyScaleToCurrent();
+      this.setStatus("");
+      return;
+    }
+    this.setStatus(
+      "Loading 3D model..."
+    );
+    if (this.loading.has(nameKey)) {
+      return;
+    }
+    this.loading.add(nameKey);
+    try {
+      const url = `${this.r2Base}${nameKey}.glb`;
+      console.log(
+        "Loading GLB:",
+        url
+      );
+      const prefab = await this.engine.loadGLTF({
+        file: url
+      });
+      if (requestId !== this.modelRequestId) {
+        return;
+      }
+      const result = this.engine.scene.instantiate(
+        prefab
+      );
+      const root = result.root;
+      root.parent = this.displayRoot;
+      root.setTranslationLocal([
+        0,
+        0.1,
+        0
+      ]);
+      root.setScalingLocal([
+        this.modelScale,
+        this.modelScale,
+        this.modelScale
+      ]);
+      root.active = true;
+      this.modelPool.set(
+        nameKey,
+        {
+          root,
+          prefab
+        }
+      );
+      this.activeModelRoot = root;
+      this.applyScaleToCurrent();
+      this.setStatus("");
+    } catch (error) {
+      console.warn(
+        `No GLB available for "${nameKey}".`,
+        error
+      );
+      if (requestId === this.modelRequestId) {
+        this.showImageFallback(
+          product.img
+        );
+        this.setStatus("");
+      }
+    } finally {
+      this.loading.delete(nameKey);
+    }
+  }
+  /* =========================================
+   * MODEL VISIBILITY
+   * ========================================= */
+  hideActiveModel() {
+    if (!this.activeModelRoot) {
+      return;
+    }
+    this.activeModelRoot.active = false;
+    this.activeModelRoot = null;
+  }
+  /* =========================================
+   * MODEL PLACEMENT
+   * ========================================= */
+  placeModel(root) {
+    if (!root) {
+      return;
+    }
+    root.setTranslationLocal([
+      0,
+      0.1,
+      0
+    ]);
+  }
+  /* =========================================
+   * ROTATION
+   * ========================================= */
+  update(dt) {
+    if (!this.isRotating) {
+      return;
+    }
+    if (!this.activeModelRoot) {
+      return;
+    }
+    const angle2 = this.rotateSpeed * dt * (Math.PI / 180);
+    this.activeModelRoot.rotateAxisAngleRadObject(
+      [0, 1, 0],
+      angle2
+    );
+  }
+  startRotation() {
+    this.isRotating = true;
+  }
+  stopRotation() {
+    this.isRotating = false;
+  }
+  /* =========================================
+   * ZOOM
+   * ========================================= */
+  setZoom(factor) {
+    const setting = this.zoomSettings[factor];
+    if (!setting) {
+      return;
+    }
+    this.currentScaleFactor = setting.scale;
+    this.applyScaleToCurrent();
+    const view = this.engine.scene.mainView;
+    if (view) {
+      view.fov = setting.fov;
+    }
+    document.querySelectorAll(".zoom-btn").forEach((button) => {
+      button.classList.remove(
+        "active"
+      );
+    });
+    let activeId = "zoom-x1";
+    if (factor === 0.5) {
+      activeId = "zoom-x05";
+    }
+    if (factor === 2) {
+      activeId = "zoom-x2";
+    }
+    document.getElementById(activeId)?.classList.add("active");
+  }
+  applyScaleToCurrent() {
+    if (!this.activeModelRoot) {
+      return;
+    }
+    const scale7 = this.modelScale * this.currentScaleFactor;
+    this.activeModelRoot.setScalingLocal([
+      scale7,
+      scale7,
+      scale7
+    ]);
+  }
+  /* =========================================
+   * IMAGE FALLBACK
+   * ========================================= */
+  showImageFallback(imgUrl) {
+    const container = document.getElementById(
+      "product-image-container"
+    );
+    const img = document.getElementById(
+      "product-image"
+    );
+    if (!container || !img) {
+      return;
+    }
+    if (!imgUrl) {
+      container.style.display = "none";
+      return;
+    }
+    img.src = imgUrl;
+    container.style.display = "block";
+  }
+  hideImageFallback() {
+    const container = document.getElementById(
+      "product-image-container"
+    );
+    if (container) {
+      container.style.display = "none";
+    }
+  }
+  /* =========================================
+   * NAME SANITIZATION
+   * ========================================= */
+  sanitizeName(name) {
+    return String(name || "").toLowerCase().trim().replace(/&/g, "and").replace(/\+/g, "plus").replace(/['’]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-");
+  }
+  /* =========================================
+   * PRICE FORMATTING
+   * ========================================= */
+  formatPrice(price) {
+    if (price === null || price === void 0 || price === "") {
+      return "\u2014";
+    }
+    const number = Number(price);
+    if (Number.isNaN(number)) {
+      return String(price);
+    }
+    return new Intl.NumberFormat(
+      "en-NG",
+      {
+        style: "currency",
+        currency: "NGN",
+        maximumFractionDigits: 0
+      }
+    ).format(number);
+  }
+  /* =========================================
+   * UI
+   * ========================================= */
   createUI() {
-    const old = document.getElementById("model-ui-root");
-    if (old)
-      old.remove();
+    document.getElementById(
+      "model-ui-root"
+    )?.remove();
+    document.getElementById(
+      "product-image-container"
+    )?.remove();
+    const imageContainer = document.createElement("div");
+    imageContainer.id = "product-image-container";
+    imageContainer.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+
+            z-index: 9998;
+
+            display: none;
+
+            width: 90%;
+            max-width: 600px;
+
+            max-height: 55vh;
+
+            border-radius: 20px;
+
+            overflow: hidden;
+
+            background: rgba(0,0,0,0.85);
+
+            box-shadow:
+                0 12px 40px rgba(0,0,0,0.5);
+
+            pointer-events: none;
+        `;
+    const image2 = document.createElement("img");
+    image2.id = "product-image";
+    image2.style.cssText = `
+            width: 100%;
+            height: auto;
+
+            max-height: 55vh;
+
+            object-fit: contain;
+
+            display: block;
+        `;
+    imageContainer.appendChild(image2);
+    document.body.appendChild(
+      imageContainer
+    );
     const root = document.createElement("div");
     root.id = "model-ui-root";
     root.style.cssText = `
             position: fixed;
+
             left: 0;
             right: 0;
             bottom: 0;
+
             z-index: 9999;
+
             pointer-events: none;
+
             display: flex;
             flex-direction: column;
+
             align-items: center;
-            padding: 0 16px 30px;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+            padding:
+                0 12px
+                max(16px, env(safe-area-inset-right))
+                max(20px, env(safe-area-inset-bottom))
+                max(16px, env(safe-area-inset-left));
+
+            font-family:
+                system-ui,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Roboto,
+                sans-serif;
+
+            box-sizing: border-box;
         `;
+    const filterPanel = document.createElement("div");
+    filterPanel.id = "menu-filter-panel";
+    filterPanel.style.cssText = `
+            pointer-events: auto;
+
+            width: 100%;
+            max-width: 520px;
+
+            margin-bottom: 8px;
+
+            display: flex;
+
+            gap: 8px;
+
+            overflow-x: auto;
+
+            scrollbar-width: none;
+
+            padding: 2px;
+        `;
+    const typeButtons = document.createElement("div");
+    typeButtons.style.cssText = `
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        `;
+    const createFilterButton = (label, value) => {
+      const button = document.createElement(
+        "button"
+      );
+      button.textContent = label;
+      button.dataset.type = value;
+      button.style.cssText = `
+                    border: none;
+
+                    padding:
+                        9px 13px;
+
+                    border-radius:
+                        999px;
+
+                    background:
+                        rgba(0,0,0,0.72);
+
+                    color: white;
+
+                    font-size: 13px;
+
+                    font-weight: 600;
+
+                    cursor: pointer;
+
+                    backdrop-filter:
+                        blur(8px);
+
+                    -webkit-backdrop-filter:
+                        blur(8px);
+
+                    white-space: nowrap;
+
+                    touch-action: manipulation;
+                `;
+      button.onclick = () => {
+        this.setType(value);
+      };
+      return button;
+    };
+    typeButtons.appendChild(
+      createFilterButton(
+        "All",
+        "all"
+      )
+    );
+    typeButtons.appendChild(
+      createFilterButton(
+        "Meals",
+        "meal"
+      )
+    );
+    typeButtons.appendChild(
+      createFilterButton(
+        "Drinks",
+        "drink"
+      )
+    );
+    filterPanel.appendChild(
+      typeButtons
+    );
+    const categorySelect = document.createElement(
+      "select"
+    );
+    categorySelect.id = "category-select";
+    categorySelect.style.cssText = `
+            border: none;
+
+            padding:
+                9px 12px;
+
+            border-radius:
+                999px;
+
+            background:
+                rgba(0,0,0,0.72);
+
+            color: white;
+
+            font-size: 13px;
+
+            font-weight: 600;
+
+            outline: none;
+
+            max-width: 180px;
+
+            backdrop-filter:
+                blur(8px);
+
+            -webkit-backdrop-filter:
+                blur(8px);
+        `;
+    categorySelect.onchange = () => {
+      this.setCategory(
+        categorySelect.value
+      );
+    };
+    filterPanel.appendChild(
+      categorySelect
+    );
+    root.appendChild(
+      filterPanel
+    );
     const panel = document.createElement("div");
     panel.id = "product-panel";
     panel.style.cssText = `
             pointer-events: none;
+
             width: 100%;
+
             max-width: 420px;
-            background: rgba(0, 0, 0, 0.72);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-radius: 16px;
-            padding: 18px 20px;
-            margin-bottom: 18px;
+
+            background:
+                rgba(0,0,0,0.72);
+
+            backdrop-filter:
+                blur(10px);
+
+            -webkit-backdrop-filter:
+                blur(10px);
+
+            border-radius:
+                16px;
+
+            padding:
+                14px 18px;
+
+            margin-bottom:
+                10px;
+
             color: white;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+
+            box-shadow:
+                0 8px 24px
+                rgba(0,0,0,0.35);
+
+            box-sizing: border-box;
         `;
     const title = document.createElement("div");
     title.id = "product-title";
     title.style.cssText = `
             font-size: 20px;
+
             font-weight: 700;
-            margin-bottom: 6px;
+
+            margin-bottom: 5px;
+
             line-height: 1.25;
         `;
     const description = document.createElement("div");
     description.id = "product-description";
     description.style.cssText = `
-            font-size: 14px;
+            font-size: 13px;
+
             opacity: 0.9;
+
             line-height: 1.4;
-            margin-bottom: 12px;
+
+            margin-bottom: 8px;
         `;
     const price = document.createElement("div");
     price.id = "product-price";
     price.style.cssText = `
-            font-size: 22px;
+            font-size: 21px;
+
             font-weight: 700;
+
             color: #4ade80;
+        `;
+    const counter = document.createElement("div");
+    counter.id = "product-counter";
+    counter.style.cssText = `
+            font-size: 11px;
+
+            opacity: 0.65;
+
+            margin-top: 5px;
         `;
     panel.appendChild(title);
     panel.appendChild(description);
     panel.appendChild(price);
+    panel.appendChild(counter);
+    root.appendChild(panel);
+    const status = document.createElement("div");
+    status.id = "menu-status";
+    status.style.cssText = `
+            color: white;
+
+            font-size: 12px;
+
+            margin-bottom: 6px;
+
+            text-shadow:
+                0 2px 5px black;
+
+            min-height: 16px;
+        `;
+    root.appendChild(status);
     const buttons = document.createElement("div");
     buttons.style.cssText = `
             display: flex;
-            gap: 20px;
-            pointer-events: none;
-        `;
-    const btnStyle = `
+
+            gap: 8px;
+
             pointer-events: auto;
-            padding: 14px 26px;
-            font-size: 16px;
-            font-weight: 600;
-            border-radius: 12px;
-            border: none;
-            background: rgba(0, 0, 0, 0.75);
-            color: white;
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
-            cursor: pointer;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-            transition: transform 0.15s, background 0.2s;
+
+            flex-wrap: wrap;
+
+            justify-content: center;
+
+            max-width: 520px;
         `;
-    const prevBtn = document.createElement("button");
-    prevBtn.textContent = "\u25C0 Previous";
-    prevBtn.style.cssText = btnStyle;
-    prevBtn.onclick = () => this.prev();
-    prevBtn.onmouseover = () => prevBtn.style.background = "rgba(0,0,0,0.9)";
-    prevBtn.onmouseout = () => prevBtn.style.background = "rgba(0,0,0,0.75)";
-    const nextBtn = document.createElement("button");
-    nextBtn.textContent = "Next \u25B6";
-    nextBtn.style.cssText = btnStyle;
-    nextBtn.onclick = () => this.next();
-    nextBtn.onmouseover = () => nextBtn.style.background = "rgba(0,0,0,0.9)";
-    nextBtn.onmouseout = () => nextBtn.style.background = "rgba(0,0,0,0.75)";
-    buttons.appendChild(prevBtn);
-    buttons.appendChild(nextBtn);
-    root.appendChild(panel);
-    root.appendChild(buttons);
-    document.body.appendChild(root);
-  }
-  updateProductInfo() {
-    const product = this.products[this.currentIndex] || {
-      title: "Product",
-      description: "",
-      price: ""
+    const buttonStyle = `
+            pointer-events: auto;
+
+            padding:
+                11px 14px;
+
+            font-size: 13px;
+
+            font-weight: 600;
+
+            border-radius: 12px;
+
+            border: none;
+
+            background:
+                rgba(0,0,0,0.75);
+
+            color: white;
+
+            backdrop-filter:
+                blur(6px);
+
+            -webkit-backdrop-filter:
+                blur(6px);
+
+            cursor: pointer;
+
+            box-shadow:
+                0 4px 14px
+                rgba(0,0,0,0.35);
+
+            user-select: none;
+
+            -webkit-user-select: none;
+
+            touch-action: manipulation;
+
+            min-height: 42px;
+        `;
+    const prev = document.createElement("button");
+    prev.textContent = "\u25C0 Prev";
+    prev.style.cssText = buttonStyle;
+    prev.onclick = () => {
+      this.prev();
     };
-    const titleEl = document.getElementById("product-title");
-    const descEl = document.getElementById("product-description");
-    const priceEl = document.getElementById("product-price");
-    if (titleEl)
-      titleEl.textContent = product.title;
-    if (descEl)
-      descEl.textContent = product.description;
-    if (priceEl)
-      priceEl.textContent = product.price;
+    const rotate2 = document.createElement("button");
+    rotate2.textContent = "\u{1F504} Hold to Rotate";
+    rotate2.style.cssText = buttonStyle;
+    rotate2.addEventListener(
+      "mousedown",
+      (event) => {
+        event.preventDefault();
+        this.startRotation();
+      }
+    );
+    rotate2.addEventListener(
+      "mouseup",
+      () => {
+        this.stopRotation();
+      }
+    );
+    rotate2.addEventListener(
+      "mouseleave",
+      () => {
+        this.stopRotation();
+      }
+    );
+    rotate2.addEventListener(
+      "touchstart",
+      (event) => {
+        event.preventDefault();
+        this.startRotation();
+      },
+      {
+        passive: false
+      }
+    );
+    rotate2.addEventListener(
+      "touchend",
+      () => {
+        this.stopRotation();
+      }
+    );
+    rotate2.addEventListener(
+      "touchcancel",
+      () => {
+        this.stopRotation();
+      }
+    );
+    const next = document.createElement("button");
+    next.textContent = "Next \u25B6";
+    next.style.cssText = buttonStyle;
+    next.onclick = () => {
+      this.next();
+    };
+    buttons.appendChild(prev);
+    buttons.appendChild(rotate2);
+    buttons.appendChild(next);
+    root.appendChild(buttons);
+    const zoomRow = document.createElement("div");
+    zoomRow.style.cssText = `
+            display: flex;
+
+            gap: 7px;
+
+            pointer-events: auto;
+
+            margin-top: 8px;
+
+            justify-content: center;
+        `;
+    const createZoomButton = (id, label, factor) => {
+      const button = document.createElement(
+        "button"
+      );
+      button.id = id;
+      button.className = "zoom-btn";
+      button.textContent = label;
+      button.style.cssText = buttonStyle;
+      button.onclick = () => {
+        this.setZoom(factor);
+      };
+      return button;
+    };
+    zoomRow.appendChild(
+      createZoomButton(
+        "zoom-x05",
+        "\xD70.5",
+        0.5
+      )
+    );
+    zoomRow.appendChild(
+      createZoomButton(
+        "zoom-x1",
+        "\xD71",
+        1
+      )
+    );
+    zoomRow.appendChild(
+      createZoomButton(
+        "zoom-x2",
+        "\xD72",
+        2
+      )
+    );
+    root.appendChild(
+      zoomRow
+    );
+    document.body.appendChild(root);
+    this.updateFilterUI();
   }
-  next() {
-    if (this.models.length === 0)
+  /* =========================================
+   * UPDATE FILTER UI
+   * ========================================= */
+  updateFilterUI() {
+    const select4 = document.getElementById(
+      "category-select"
+    );
+    if (!select4) {
       return;
-    this.currentIndex = (this.currentIndex + 1) % this.models.length;
-    this.showOnly(this.currentIndex);
-    this.updateProductInfo();
+    }
+    select4.innerHTML = "";
+    for (const category of this.categories) {
+      const option = document.createElement(
+        "option"
+      );
+      option.value = category;
+      option.textContent = category === "all" ? "All Categories" : category;
+      option.selected = category === this.currentCategory;
+      select4.appendChild(
+        option
+      );
+    }
+    document.querySelectorAll(
+      "[data-type]"
+    ).forEach((button) => {
+      const active = button.dataset.type === this.currentType;
+      if (active) {
+        button.style.background = "rgba(74,222,128,0.85)";
+        button.style.color = "#06140b";
+      } else {
+        button.style.background = "rgba(0,0,0,0.72)";
+        button.style.color = "white";
+      }
+    });
   }
-  prev() {
-    if (this.models.length === 0)
+  /* =========================================
+   * UPDATE PRODUCT UI
+   * ========================================= */
+  updateUI() {
+    const title = document.getElementById(
+      "product-title"
+    );
+    const description = document.getElementById(
+      "product-description"
+    );
+    const price = document.getElementById(
+      "product-price"
+    );
+    const counter = document.getElementById(
+      "product-counter"
+    );
+    if (!title || !description || !price || !counter) {
       return;
-    this.currentIndex = (this.currentIndex - 1 + this.models.length) % this.models.length;
-    this.showOnly(this.currentIndex);
-    this.updateProductInfo();
+    }
+    if (!this.currentProduct) {
+      title.textContent = "";
+      description.textContent = "";
+      price.textContent = "";
+      counter.textContent = "";
+      return;
+    }
+    title.textContent = this.currentProduct.name;
+    description.textContent = this.currentProduct.desc;
+    price.textContent = this.formatPrice(
+      this.currentProduct.price
+    );
+    counter.textContent = `${this.currentIndex + 1} / ${this.filteredProducts.length}`;
+    window.dispatchEvent(
+      new CustomEvent(
+        "armenu-update",
+        {
+          detail: {
+            product: this.currentProduct,
+            index: this.currentIndex,
+            total: this.filteredProducts.length,
+            categories: this.categories,
+            type: this.currentType,
+            category: this.currentCategory
+          }
+        }
+      )
+    );
   }
-  showOnly(index) {
-    for (let i = 0; i < this.models.length; i++) {
-      this.models[i].active = i === index;
+  /* =========================================
+   * STATUS
+   * ========================================= */
+  setStatus(message) {
+    const status = document.getElementById(
+      "menu-status"
+    );
+    if (status) {
+      status.textContent = message || "";
     }
   }
 };
-__publicField(ModelCarousel, "TypeName", "model-carousel");
-__publicField(ModelCarousel, "Properties", {
-  model0: Property2.object(),
-  model1: Property2.object(),
-  model2: Property2.object(),
-  startIndex: Property2.int(0)
+__publicField(ARMenuManager, "TypeName", "ar-menu-manager");
+__publicField(ARMenuManager, "Properties", {
+  apiBase: Property2.string("https://your-backend.com/api"),
+  r2Base: Property2.string(
+    "https://pub-xxxxxxxx.r2.dev/models/"
+  ),
+  displayRoot: Property2.object(),
+  modelScale: Property2.float(0.3),
+  rotateSpeed: Property2.float(90)
+});
+
+// js/TrackingSmoother.js
+import { Component as Component4, Property as Property3 } from "@wonderlandengine/api";
+var TrackingSmoother = class extends Component4 {
+  init() {
+    this._position = new Float32Array(3);
+    this._rotation = new Float32Array(4);
+    this._hasPrevious = false;
+  }
+  update(dt) {
+    if (!this.object.active) {
+      this._hasPrevious = false;
+      return;
+    }
+    const currentPosition = this.object.getPositionWorld();
+    const currentRotation = this.object.getRotationWorld();
+    if (!this._hasPrevious) {
+      this._position.set(
+        currentPosition
+      );
+      this._rotation.set(
+        currentRotation
+      );
+      this._hasPrevious = true;
+      return;
+    }
+    const t = 1 - Math.exp(
+      -this.smoothFactor * dt
+    );
+    this._position[0] += (currentPosition[0] - this._position[0]) * t;
+    this._position[1] += (currentPosition[1] - this._position[1]) * t;
+    this._position[2] += (currentPosition[2] - this._position[2]) * t;
+    for (let i = 0; i < 4; i++) {
+      this._rotation[i] += (currentRotation[i] - this._rotation[i]) * t;
+    }
+    const length5 = Math.hypot(
+      this._rotation[0],
+      this._rotation[1],
+      this._rotation[2],
+      this._rotation[3]
+    );
+    if (length5 > 1e-4) {
+      this._rotation[0] /= length5;
+      this._rotation[1] /= length5;
+      this._rotation[2] /= length5;
+      this._rotation[3] /= length5;
+    }
+    this.object.setPositionWorld(
+      this._position
+    );
+    this.object.setRotationWorld(
+      this._rotation
+    );
+  }
+};
+__publicField(TrackingSmoother, "TypeName", "tracking-smoother");
+__publicField(TrackingSmoother, "Properties", {
+  /*
+   * Higher value:
+   * more responsive
+   * less smoothing
+   *
+   * Lower value:
+   * smoother
+   * more tracking lag
+   */
+  smoothFactor: Property3.float(12)
 });
 
 // js/index.js
 function js_default(engine2) {
-  engine2.registerComponent(ImageTracking);
-  engine2.registerComponent(ImageTrackingTarget);
-  engine2.registerComponent(ModelCarousel);
+  engine2.registerComponent(
+    ImageTracking
+  );
+  engine2.registerComponent(
+    ImageTrackingTarget
+  );
+  engine2.registerComponent(
+    ARMenuManager
+  );
+  engine2.registerComponent(
+    TrackingSmoother
+  );
 }
 export {
   js_default as default
