@@ -1,0 +1,1217 @@
+{
+    "settings": {
+        "project": {
+            "name": "WEB Tray Abincii",
+            "version": [
+                1,
+                6,
+                1
+            ]
+        },
+        "scripting": {
+            "components": {
+                "output": "WEB Tray Abincii-bundle.js"
+            },
+            "application": {
+                "output": "WEB Tray Abincii-app.js"
+            }
+        },
+        "xr": {
+            "vr": {
+                "enable": false
+            },
+            "ar": {
+                "enable": false
+            },
+            "webxr": {
+                "requiredFeatures": {
+                    "hit-test": true
+                }
+            },
+            "leftEyeObject": "1",
+            "rightEyeObject": "1"
+        },
+        "rendering": {
+            "environment": {
+                "enabled": false,
+                "bakingMode": "sky",
+                "material": "3"
+            },
+            "sky": {
+                "enabled": true,
+                "material": "3"
+            }
+        },
+        "runtime": {
+            "loadUncompressedImagesAsBitmap": false
+        },
+        "gi": {
+            "probeVolume": {
+                "enabled": false,
+                "scaling": [
+                    6.2074909,
+                    5.7373619,
+                    3.5628056
+                ],
+                "translation": [
+                    -0.1391772,
+                    -0.1276911,
+                    0.9074745
+                ],
+                "scenario": "1"
+            }
+        }
+    },
+    "files": {
+        "1": {
+            "fileName": "textures/isiewuuuu.mtl",
+            "importerName": "",
+            "colorSpace": "srgb",
+            "importSecondaryUVLegacy": true
+        },
+        "2": {
+            "fileName": "models/isiewuuuu.glb",
+            "importerName": "",
+            "importPhysicalAsPhongMaterials": true,
+            "colorSpace": "srgb",
+            "importSecondaryUVLegacy": true
+        },
+        "3": {
+            "fileName": "models/ABAcha1.glb",
+            "importerName": "",
+            "importPhysicalAsPhongMaterials": true,
+            "colorSpace": "srgb",
+            "importSecondaryUVLegacy": true
+        },
+        "4": {
+            "fileName": "textures/3DModel.jpg",
+            "importerName": "",
+            "colorSpace": "srgb",
+            "importSecondaryUVLegacy": true
+        },
+        "5": {
+            "fileName": "textures/abacha RL.jpg",
+            "importerName": "",
+            "colorSpace": "srgb",
+            "importSecondaryUVLegacy": true
+        },
+        "6": {
+            "fileName": "js/ModelCarousel.js",
+            "importerName": ""
+        },
+        "7": {
+            "fileName": "textures/fishtail txtr.jpg",
+            "importerName": ""
+        },
+        "8": {
+            "fileName": "textures/isiazu txtr.jpg",
+            "importerName": ""
+        },
+        "9": {
+            "fileName": "textures/nkwobi txtr.jpg",
+            "importerName": ""
+        },
+        "10": {
+            "fileName": "textures/isiewu txtr RL.jpg",
+            "importerName": ""
+        },
+        "11": {
+            "fileName": "models/Nwobbbbbb.obj",
+            "importerName": ""
+        },
+        "12": {
+            "fileName": "models/oduazu.fbx",
+            "importerName": ""
+        },
+        "13": {
+            "fileName": "models/IsiAzu.obj",
+            "importerName": ""
+        },
+        "14": {
+            "fileName": "textures/wtrice.JPG",
+            "importerName": ""
+        },
+        "15": {
+            "fileName": "textures/jolof.JPG",
+            "importerName": ""
+        },
+        "16": {
+            "fileName": "models/IsiAAzu.glb",
+            "importerName": ""
+        },
+        "17": {
+            "fileName": "models/AbAAcha.glb",
+            "importerName": ""
+        },
+        "18": {
+            "fileName": "models/OduAAzu.glb",
+            "importerName": ""
+        },
+        "19": {
+            "fileName": "models/ABAacha2.glb",
+            "importerName": ""
+        },
+        "20": {
+            "fileName": "models/oduazu22.glb",
+            "importerName": ""
+        },
+        "21": {
+            "fileName": "models/Abacha101.glb",
+            "importerName": ""
+        },
+        "22": {
+            "fileName": "models/Isiazu101.glb",
+            "importerName": ""
+        },
+        "23": {
+            "fileName": "models/Isiewu101.glb",
+            "importerName": ""
+        },
+        "24": {
+            "fileName": "models/Nkwobi101.glb",
+            "importerName": ""
+        },
+        "25": {
+            "fileName": "models/Oduazu101.glb",
+            "importerName": ""
+        },
+        "26": {
+            "fileName": "static/images/jolof.JPG",
+            "importerName": ""
+        },
+        "27": {
+            "fileName": "static/images/wtrice.JPG",
+            "importerName": ""
+        }
+    },
+    "images": {
+        "1": {
+            "link": {
+                "name": "isiewuuuu.mtl",
+                "file": "textures\\isiewuuuu.mtl"
+            }
+        },
+        "2": {
+            "link": {
+                "name": "3DModel.jpg",
+                "file": "textures\\3DModel.jpg"
+            }
+        },
+        "3": {
+            "link": {
+                "name": "abacha RL.jpg",
+                "file": "textures\\abacha RL.jpg"
+            }
+        },
+        "4": {
+            "link": {
+                "name": "fishtail txtr.jpg",
+                "file": "textures\\fishtail txtr.jpg"
+            }
+        },
+        "5": {
+            "link": {
+                "name": "isiazu txtr.jpg",
+                "file": "textures\\isiazu txtr.jpg"
+            }
+        },
+        "6": {
+            "link": {
+                "name": "nkwobi txtr.jpg",
+                "file": "textures\\nkwobi txtr.jpg"
+            }
+        },
+        "7": {
+            "link": {
+                "name": "isiewu txtr RL.jpg",
+                "file": "textures\\isiewu txtr RL.jpg"
+            }
+        },
+        "8": {
+            "link": {
+                "name": "wtrice.JPG",
+                "file": "textures\\wtrice.JPG"
+            }
+        },
+        "9": {
+            "link": {
+                "name": "jolof.JPG",
+                "file": "textures\\jolof.JPG"
+            }
+        },
+        "10": {
+            "link": {
+                "name": "jolof.JPG",
+                "file": "static\\images\\jolof.JPG"
+            }
+        },
+        "11": {
+            "link": {
+                "name": "wtrice.JPG",
+                "file": "static\\images\\wtrice.JPG"
+            }
+        }
+    },
+    "shaders": {
+        "1": {
+            "link": {
+                "name": "AtmosphericSky.frag",
+                "file": "default"
+            }
+        },
+        "2": {
+            "link": {
+                "name": "Background.frag",
+                "file": "default"
+            },
+            "packageAlways": false
+        },
+        "6": {
+            "link": {
+                "name": "Depth.frag",
+                "file": "default"
+            }
+        },
+        "7": {
+            "link": {
+                "name": "DistanceFieldVector.frag",
+                "file": "default"
+            }
+        },
+        "8": {
+            "link": {
+                "name": "Dynamic.vert",
+                "file": "default"
+            }
+        },
+        "9": {
+            "link": {
+                "name": "Flat.frag",
+                "file": "default"
+            }
+        },
+        "10": {
+            "link": {
+                "name": "FullScreenTriangle.vert",
+                "file": "default"
+            }
+        },
+        "16": {
+            "link": {
+                "name": "MeshVisualizer.frag",
+                "file": "default"
+            }
+        },
+        "19": {
+            "link": {
+                "name": "Phong.frag",
+                "file": "default"
+            }
+        },
+        "20": {
+            "link": {
+                "name": "Physical.frag",
+                "file": "default"
+            }
+        },
+        "23": {
+            "link": {
+                "name": "Skinning.vert",
+                "file": "default"
+            }
+        },
+        "24": {
+            "link": {
+                "name": "Sky.frag",
+                "file": "default"
+            },
+            "packageAlways": false
+        },
+        "29": {
+            "link": {
+                "name": "Text.frag",
+                "file": "default"
+            }
+        },
+        "30": {
+            "link": {
+                "name": "Text.vert",
+                "file": "default"
+            }
+        },
+        "32": {
+            "link": {
+                "name": "TileFeedback.frag",
+                "file": "default"
+            }
+        },
+        "34": {
+            "link": {
+                "name": "Particle.frag",
+                "file": "default"
+            }
+        },
+        "35": {
+            "link": {
+                "name": "Color.frag",
+                "file": "default"
+            }
+        }
+    },
+    "meshes": {
+        "p0": {
+            "link": {
+                "name": "PrimitivePlane",
+                "file": "default"
+            }
+        },
+        "p1": {
+            "link": {
+                "name": "PrimitiveCube",
+                "file": "default"
+            }
+        },
+        "p2": {
+            "link": {
+                "name": "PrimitiveSphere",
+                "file": "default"
+            }
+        },
+        "p3": {
+            "link": {
+                "name": "PrimitiveCone",
+                "file": "default"
+            }
+        },
+        "p4": {
+            "link": {
+                "name": "PrimitiveCylinder",
+                "file": "default"
+            }
+        },
+        "p5": {
+            "link": {
+                "name": "PrimitiveCircle",
+                "file": "default"
+            }
+        },
+        "1": {
+            "link": {
+                "name": "Mesh0",
+                "file": "models\\isiewuuuu.glb"
+            }
+        },
+        "2": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\ABAcha1.glb"
+            }
+        },
+        "3": {
+            "link": {
+                "name": "mesh_1",
+                "file": "models\\Nwobbbbbb.obj"
+            }
+        },
+        "4": {
+            "link": {
+                "name": "mesh_0",
+                "file": "models\\oduazu.fbx"
+            }
+        },
+        "5": {
+            "link": {
+                "name": "mesh_1",
+                "file": "models\\IsiAzu.obj"
+            }
+        },
+        "6": {
+            "link": {
+                "name": "3DModel.001",
+                "file": "models\\IsiAAzu.glb"
+            }
+        },
+        "7": {
+            "link": {
+                "name": "3DModel.001",
+                "file": "models\\AbAAcha.glb"
+            }
+        },
+        "8": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\OduAAzu.glb"
+            }
+        },
+        "9": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\ABAacha2.glb"
+            }
+        },
+        "10": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\oduazu22.glb"
+            }
+        },
+        "11": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\Abacha101.glb"
+            }
+        },
+        "12": {
+            "link": {
+                "name": "3DModel.001",
+                "file": "models\\Isiazu101.glb"
+            }
+        },
+        "13": {
+            "link": {
+                "name": "3DModel.002",
+                "file": "models\\Isiewu101.glb"
+            }
+        },
+        "14": {
+            "link": {
+                "name": "3DModel.003",
+                "file": "models\\Nkwobi101.glb"
+            }
+        },
+        "15": {
+            "link": {
+                "name": "3DModel.004",
+                "file": "models\\Oduazu101.glb"
+            }
+        }
+    },
+    "morphTargets": {},
+    "textures": {
+        "1": {
+            "name": "Videotexture"
+        },
+        "2": {
+            "name": "texture",
+            "image": "1"
+        },
+        "3": {
+            "link": {
+                "name": "isiewuuuu.mtl",
+                "file": "textures\\isiewuuuu.mtl"
+            },
+            "image": "2"
+        },
+        "4": {
+            "link": {
+                "name": "3DModel.jpg",
+                "file": "textures\\3DModel.jpg"
+            },
+            "image": "2"
+        },
+        "5": {
+            "link": {
+                "name": "abacha RL.jpg",
+                "file": "textures\\abacha RL.jpg"
+            }
+        },
+        "6": {
+            "link": {
+                "name": "fishtail txtr.jpg",
+                "file": "textures\\fishtail txtr.jpg"
+            }
+        },
+        "7": {
+            "link": {
+                "name": "isiazu txtr.jpg",
+                "file": "textures\\isiazu txtr.jpg"
+            }
+        },
+        "8": {
+            "link": {
+                "name": "nkwobi txtr.jpg",
+                "file": "textures\\nkwobi txtr.jpg"
+            }
+        },
+        "9": {
+            "link": {
+                "name": "isiewu txtr RL.jpg",
+                "file": "textures\\isiewu txtr RL.jpg"
+            }
+        },
+        "10": {
+            "link": {
+                "name": "base_color_texture",
+                "file": "models\\oduazu.fbx"
+            }
+        },
+        "11": {
+            "link": {
+                "name": "wtrice.JPG",
+                "file": "textures\\wtrice.JPG"
+            }
+        },
+        "12": {
+            "link": {
+                "name": "jolof.JPG",
+                "file": "textures\\jolof.JPG"
+            }
+        },
+        "13": {
+            "link": {
+                "name": "jolof.JPG",
+                "file": "static\\images\\jolof.JPG"
+            }
+        },
+        "14": {
+            "link": {
+                "name": "wtrice.JPG",
+                "file": "static\\images\\wtrice.JPG"
+            }
+        }
+    },
+    "materials": {
+        "DefaultFontMaterial": {
+            "link": {
+                "name": "DefaultFontMaterial",
+                "file": "default"
+            }
+        },
+        "1": {
+            "name": "UImat",
+            "pipeline": "7",
+            "Flat": {
+                "color": [
+                    0.635294,
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+            }
+        },
+        "2": {
+            "name": "UImat2",
+            "pipeline": "7",
+            "Flat": {
+                "color": [
+                    0.5490195,
+                    0.002153,
+                    0.002153,
+                    1.0
+                ]
+            },
+            "Phong": {
+                "diffuseColor": [
+                    0.717647,
+                    0.1857437,
+                    0.1857437,
+                    1.0
+                ]
+            }
+        },
+        "3": {
+            "name": "VideoFeed",
+            "pipeline": "16",
+            "Background": {
+                "texture": "1"
+            },
+            "Flat": {
+                "color": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "flatTexture": null
+            }
+        },
+        "4": {
+            "name": "mata",
+            "pipeline": "3",
+            "Flat": {
+                "color": [
+                    0.1277046,
+                    0.6784312,
+                    0.244329,
+                    1.0
+                ]
+            }
+        },
+        "5": {
+            "link": {
+                "name": "x1",
+                "file": "models\\isiewuuuu.glb"
+            },
+            "pipeline": "11",
+            "Flat": {
+                "color": [
+                    0.8999999,
+                    0.8999999,
+                    0.8999999,
+                    1.0
+                ],
+                "flatTexture": "3"
+            },
+            "Physical": {
+                "albedoColor": [
+                    0.8999999,
+                    0.8999999,
+                    0.8999999,
+                    1.0
+                ],
+                "roughnessFactor": 0.5,
+                "metallicFactor": 0.05,
+                "albedoTexture": "3"
+            },
+            "Phong": {
+                "diffuseColor": [
+                    0.8999999,
+                    0.8999999,
+                    0.8999999,
+                    1.0
+                ],
+                "shininess": 63,
+                "specularColor": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    0.05
+                ],
+                "diffuseTexture": "3"
+            }
+        },
+        "6": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\ABAcha1.glb"
+            },
+            "pipeline": "11",
+            "Physical": {
+                "metallicFactor": 0.0,
+                "albedoTexture": "5"
+            }
+        },
+        "7": {
+            "name": "Aba",
+            "pipeline": "11",
+            "Physical": {
+                "albedoTexture": "5"
+            }
+        },
+        "8": {
+            "name": "isi ewu",
+            "pipeline": "11",
+            "Physical": {
+                "albedoTexture": "9"
+            }
+        },
+        "9": {
+            "name": "isi",
+            "pipeline": "11",
+            "Physical": {
+                "albedoTexture": "7"
+            }
+        },
+        "10": {
+            "name": "tail",
+            "pipeline": "11",
+            "Physical": {
+                "albedoTexture": "6"
+            }
+        },
+        "11": {
+            "name": "nkwo",
+            "pipeline": "11",
+            "Physical": {
+                "albedoTexture": "8"
+            }
+        },
+        "12": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\Nwobbbbbb.obj"
+            }
+        },
+        "13": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\oduazu.fbx"
+            }
+        },
+        "14": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\IsiAzu.obj"
+            }
+        },
+        "15": {
+            "name": "jlof",
+            "pipeline": "4"
+        },
+        "16": {
+            "name": "wtrice",
+            "pipeline": "4"
+        },
+        "17": {
+            "link": {
+                "name": "3DModel.001",
+                "file": "models\\IsiAAzu.glb"
+            }
+        },
+        "18": {
+            "link": {
+                "name": "3DModel.001",
+                "file": "models\\AbAAcha.glb"
+            }
+        },
+        "19": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\OduAAzu.glb"
+            }
+        },
+        "20": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\ABAacha2.glb"
+            }
+        },
+        "21": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\oduazu22.glb"
+            }
+        },
+        "22": {
+            "link": {
+                "name": "3DModel",
+                "file": "models\\Abacha101.glb"
+            }
+        },
+        "23": {
+            "link": {
+                "name": "3DModel.001",
+                "file": "models\\Isiazu101.glb"
+            }
+        },
+        "24": {
+            "link": {
+                "name": "3DModel.002",
+                "file": "models\\Isiewu101.glb"
+            }
+        },
+        "25": {
+            "link": {
+                "name": "3DModel.003",
+                "file": "models\\Nkwobi101.glb"
+            }
+        },
+        "26": {
+            "link": {
+                "name": "3DModel.004",
+                "file": "models\\Oduazu101.glb"
+            }
+        }
+    },
+    "objects": {
+        "1": {
+            "name": "ARCamera",
+            "components": [
+                {
+                    "type": "view"
+                },
+                {
+                    "type": "image-tracking",
+                    "image-tracking": {
+                        "mindPath": "targets.mind",
+                        "videoPane": null
+                    }
+                }
+            ],
+            "parent": null,
+            "translation": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scaling": [
+                1.0,
+                1.0,
+                1.0
+            ]
+        },
+        "2": {
+            "name": "MarkerTarget",
+            "parent": "1",
+            "translation": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scaling": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "components": [
+                {
+                    "type": "image-tracking-target",
+                    "image-tracking-target": {
+                        "arCamera": "1"
+                    }
+                },
+                {
+                    "type": "tracking-smoother",
+                    "tracking-smoother": {
+                        "smoothFactor": 12.0
+                    }
+                },
+                {
+                    "type": "model-carousel",
+                    "model-carousel": {
+                        "model0": null,
+                        "model1": null,
+                        "model2": null,
+                        "model3": null,
+                        "model4": null,
+                        "model5": null,
+                        "model6": null
+                    }
+                }
+            ]
+        },
+        "17": {
+            "name": "Light",
+            "components": [
+                {
+                    "type": "light",
+                    "light": {
+                        "type": "sun"
+                    }
+                }
+            ],
+            "translation": [
+                0.0,
+                0.0,
+                3.8481922
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scaling": [
+                1.0,
+                1.0,
+                1.0
+            ]
+        },
+        "18": {
+            "link": {
+                "name": "Light",
+                "file": "models\\oduazu.fbx"
+            },
+            "parent": null,
+            "translation": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scaling": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "name": "manager",
+            "components": [
+                {
+                    "type": "ar-menu-manager",
+                    "ar-menu-manager": {
+                        "r2Base": "https://your-backend.com/api",
+                        "apiBase": "https://api.abincii.com/",
+                        "displayRoot": "7"
+                    }
+                }
+            ]
+        },
+        "7": {
+            "name": "AR Menu Root",
+            "parent": "2"
+        }
+    },
+    "animations": {},
+    "skins": {},
+    "pipelines": {
+        "1": {
+            "link": {
+                "name": "Depth",
+                "file": "default"
+            }
+        },
+        "2": {
+            "link": {
+                "name": "DistanceFieldVector",
+                "file": "default"
+            }
+        },
+        "3": {
+            "link": {
+                "name": "Flat Opaque",
+                "file": "default"
+            }
+        },
+        "4": {
+            "link": {
+                "name": "Flat Opaque Textured",
+                "file": "default"
+            }
+        },
+        "5": {
+            "link": {
+                "name": "MeshVisualizer",
+                "file": "default"
+            }
+        },
+        "6": {
+            "link": {
+                "name": "Phong Opaque",
+                "file": "default"
+            }
+        },
+        "7": {
+            "link": {
+                "name": "Phong Opaque Textured",
+                "file": "default"
+            }
+        },
+        "8": {
+            "link": {
+                "name": "Phong Normalmapped",
+                "file": "default"
+            }
+        },
+        "9": {
+            "link": {
+                "name": "Phong Lightmapped",
+                "file": "default"
+            }
+        },
+        "10": {
+            "link": {
+                "name": "Physical Opaque",
+                "file": "default"
+            }
+        },
+        "11": {
+            "link": {
+                "name": "Physical Opaque Textured",
+                "file": "default"
+            }
+        },
+        "12": {
+            "link": {
+                "name": "Text",
+                "file": "default"
+            }
+        },
+        "13": {
+            "link": {
+                "name": "TileFeedback",
+                "file": "default"
+            }
+        },
+        "14": {
+            "link": {
+                "name": "Foliage",
+                "file": "default"
+            }
+        },
+        "15": {
+            "link": {
+                "name": "Particle",
+                "file": "default"
+            }
+        },
+        "16": {
+            "link": {
+                "name": "Sky",
+                "file": "default"
+            },
+            "shader": "2",
+            "features": {
+                "TEXTURED": true,
+                "ENVIRONMENT_PROBE": false,
+                "GRADIENT": false,
+                "GRADIENT_4_STOPS": false
+            }
+        },
+        "17": {
+            "link": {
+                "name": "AtmosphericSky",
+                "file": "default"
+            }
+        },
+        "18": {
+            "link": {
+                "name": "Color",
+                "file": "default"
+            }
+        },
+        "19": {
+            "link": {
+                "name": "VertexColor",
+                "file": "default"
+            }
+        }
+    },
+    "fonts": {
+        "1": {
+            "link": {
+                "name": "DejaVuSans.ttf",
+                "file": "default"
+            }
+        }
+    },
+    "languages": {},
+    "particleEffects": {},
+    "audioClips": {},
+    "shaderChunks": {
+        "1": {
+            "link": {
+                "name": "lib\\Color.glsl",
+                "file": "default"
+            }
+        },
+        "2": {
+            "link": {
+                "name": "lib\\Compatibility.glsl",
+                "file": "default"
+            }
+        },
+        "3": {
+            "link": {
+                "name": "lib\\CoordinateSystems.glsl",
+                "file": "default"
+            }
+        },
+        "4": {
+            "link": {
+                "name": "lib\\GI.glsl",
+                "file": "default"
+            }
+        },
+        "5": {
+            "link": {
+                "name": "lib\\Inputs.glsl",
+                "file": "default"
+            }
+        },
+        "6": {
+            "link": {
+                "name": "lib\\Lights.glsl",
+                "file": "default"
+            }
+        },
+        "7": {
+            "link": {
+                "name": "lib\\Materials.glsl",
+                "file": "default"
+            }
+        },
+        "8": {
+            "link": {
+                "name": "lib\\Math.glsl",
+                "file": "default"
+            }
+        },
+        "9": {
+            "link": {
+                "name": "lib\\MorphTargets.glsl",
+                "file": "default"
+            }
+        },
+        "10": {
+            "link": {
+                "name": "lib\\Packing.glsl",
+                "file": "default"
+            }
+        },
+        "11": {
+            "link": {
+                "name": "lib\\PhysicalBSDF.glsl",
+                "file": "default"
+            }
+        },
+        "12": {
+            "link": {
+                "name": "lib\\Quaternion.glsl",
+                "file": "default"
+            }
+        },
+        "13": {
+            "link": {
+                "name": "lib\\SkyProcedural.glsl",
+                "file": "default"
+            }
+        },
+        "14": {
+            "link": {
+                "name": "lib\\Slug.frag.glsl",
+                "file": "default"
+            }
+        },
+        "15": {
+            "link": {
+                "name": "lib\\Slug.vert.glsl",
+                "file": "default"
+            }
+        },
+        "16": {
+            "link": {
+                "name": "lib\\Surface.glsl",
+                "file": "default"
+            }
+        },
+        "17": {
+            "link": {
+                "name": "lib\\Textures.glsl",
+                "file": "default"
+            }
+        },
+        "18": {
+            "link": {
+                "name": "lib\\Uniforms.glsl",
+                "file": "default"
+            }
+        },
+        "19": {
+            "link": {
+                "name": "lib\\VertexAttributes.glsl",
+                "file": "default"
+            }
+        }
+    },
+    "probeVolumeScenarios": {
+        "1": {}
+    },
+    "plugins": {}
+}
