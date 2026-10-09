@@ -4,10 +4,10 @@ export class ARMenuManager extends Component {
     static TypeName = 'ar-menu-manager';
 
     static Properties = {
-        apiBase: Property.string('https://your-backend.com/api'),
+        apiBase: Property.string('https://api.abincii.com/api'),
 
         r2Base: Property.string(
-            'https://pub-xxxxxxxx.r2.dev/models/'
+            'https://https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models/'
         ),
 
         displayRoot: Property.object(),
