@@ -68240,9 +68240,9 @@ var ARMenuManager = class extends Component3 {
 };
 __publicField(ARMenuManager, "TypeName", "ar-menu-manager");
 __publicField(ARMenuManager, "Properties", {
-  apiBase: Property2.string("https://your-backend.com/api"),
+  apiBase: Property2.string("https://api.abincii.com/api"),
   r2Base: Property2.string(
-    "https://pub-xxxxxxxx.r2.dev/models/"
+    "https://https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models/"
   ),
   displayRoot: Property2.object(),
   modelScale: Property2.float(0.3),
