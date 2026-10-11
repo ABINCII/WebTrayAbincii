@@ -67234,65 +67234,52 @@ var ARMenuManager = class extends Component3 {
     this.products = [];
     this.filteredProducts = [];
     this.categories = [];
-    this.currentType = "all";
+    this.currentType = "meal";
     this.currentCategory = "all";
     this.currentIndex = 0;
     this.currentProduct = null;
     this.modelPool = /* @__PURE__ */ new Map();
     this.activeModelRoot = null;
-    this.loading = /* @__PURE__ */ new Set();
+    this.modelPrefabs = /* @__PURE__ */ new Map();
+    this.modelLoads = /* @__PURE__ */ new Map();
+    this.preloadQueue = [];
+    this.preloadQueuedIds = /* @__PURE__ */ new Set();
+    this.preloadWorkerRunning = false;
+    this.maxCachedInstances = 8;
     this.modelRequestId = 0;
     this.isRotating = false;
     this.currentScaleFactor = 1;
     this.zoomSettings = {
-      0.5: {
-        scale: 0.5,
-        fov: 85
-      },
-      1: {
-        scale: 1,
-        fov: 60
-      },
-      2: {
-        scale: 2,
-        fov: 75
-      }
+      0.5: { scale: 0.5, fov: 85 },
+      1: { scale: 1, fov: 60 },
+      2: { scale: 2, fov: 75 }
     };
   }
   async start() {
     this.createUI();
     window.arMenu = this;
-    const params = new URLSearchParams(
-      window.location.search
-    );
+    const params = new URLSearchParams(window.location.search);
     this.restaurantId = params.get("restaurant");
     this.tableId = params.get("table");
     if (!this.restaurantId) {
       console.error(
         "ARMenuManager: No restaurant ID found in URL."
       );
-      this.setStatus(
-        "No restaurant ID was provided."
-      );
+      this.setStatus("No restaurant ID was provided.");
       return;
     }
-    console.log(
-      "Restaurant:",
-      this.restaurantId
-    );
-    console.log(
-      "Table:",
-      this.tableId
-    );
+    console.log("Restaurant:", this.restaurantId);
+    console.log("Table:", this.tableId);
     this.setZoom(1);
     await this.fetchMenu(this.restaurantId);
     this.buildCategories();
     this.applyFilters();
     if (this.filteredProducts.length > 0) {
       this.showProduct(0);
+      this.startRestaurantPreload();
     } else {
       this.setStatus(
-        "No menu items were found."
+        this.currentType === "meal" ? "No meals found. Select Drinks to view drinks." : "No drinks found. Select Meals to view meals."
       );
     }
   }
@@ -67303,25 +67290,17 @@ var ARMenuManager = class extends Component3 {
     try {
       this.setStatus("Loading menu...");
       const url = `${this.apiBase}/restaurants/menu?restaurant=${encodeURIComponent(restaurantId)}`;
-      console.log(
-        "Fetching menu:",
-        url
-      );
       const response = await fetch(url);
       if (!response.ok) {
-        throw new Error(
-          `HTTP ${response.status}`
-        );
+        throw new Error(`HTTP ${response.status}`);
       }
       const data = await response.json();
       if (!data.success) {
-        throw new Error(
-          "Backend returned success=false"
-        );
+        throw new Error("Backend returned success=false");
       }
       const meals = (data.meal || []).map((meal) => ({
         type: "meal",
-        id: meal._id,
+        id: String(meal._id || ""),
         name: meal.mealName || "Unnamed Meal",
         desc: meal.desc || "",
         price: meal.price,
@@ -67331,7 +67310,7 @@ var ARMenuManager = class extends Component3 {
       }));
       const drinks = (data.drink || []).map((drink) => ({
         type: "drink",
-        id: drink._id,
+        id: String(drink._id || ""),
         name: drink.drinkName || "Unnamed Drink",
         desc: drink.desc || "",
         price: drink.price,
@@ -67339,12 +67318,9 @@ var ARMenuManager = class extends Component3 {
         img: drink.drinkImg || "",
         raw: drink
       }));
-      this.products = [
-        ...meals,
-        ...drinks
-      ];
+      this.products = [...meals, ...drinks];
       console.log(
-        `Loaded ${this.products.length} products`
+        `Loaded ${this.products.length} products for restaurant ${restaurantId}`
       );
       this.setStatus("");
     } catch (error) {
@@ -67353,9 +67329,7 @@ var ARMenuManager = class extends Component3 {
         error
       );
       this.products = [];
-      this.setStatus(
-        "Unable to load menu."
-      );
+      this.setStatus("Unable to load menu.");
     }
   }
   /* =========================================
@@ -67364,21 +67338,26 @@ var ARMenuManager = class extends Component3 {
   buildCategories() {
     const categorySet = /* @__PURE__ */ new Set();
     for (const product of this.products) {
-      if (product.category) {
+      if (product.type === this.currentType && product.category) {
         categorySet.add(product.category);
       }
     }
     this.categories = [
       "all",
-      ...Array.from(categorySet).sort()
+      ...Array.from(categorySet).sort(
+        (a, b) => String(a).localeCompare(String(b))
+      )
     ];
+    if (this.currentCategory !== "all" && !categorySet.has(this.currentCategory)) {
+      this.currentCategory = "all";
+    }
   }
   /* =========================================
    * FILTERING
    * ========================================= */
   applyFilters() {
     this.filteredProducts = this.products.filter((product) => {
-      const typeMatches = this.currentType === "all" || product.type === this.currentType;
+      const typeMatches = product.type === this.currentType;
       const categoryMatches = this.currentCategory === "all" || product.category === this.currentCategory;
       return typeMatches && categoryMatches;
     });
@@ -67387,15 +67366,26 @@ var ARMenuManager = class extends Component3 {
     this.updateUI();
   }
   setType(type) {
+    if (type !== "meal" && type !== "drink") {
+      console.warn(
+        'ARMenuManager: type must be "meal" or "drink".'
+      );
+      return;
+    }
     this.currentType = type;
     this.currentCategory = "all";
+    this.buildCategories();
     this.applyFilters();
     if (this.filteredProducts.length > 0) {
       this.showProduct(0);
     } else {
       this.hideActiveModel();
+      this.hideImageFallback();
       this.currentProduct = null;
       this.updateUI();
+      this.setStatus(
+        type === "meal" ? "No meals found. Select Drinks to view drinks." : "No drinks found. Select Meals to view meals."
+      );
     }
   }
   setCategory(category) {
@@ -67405,44 +67395,36 @@ var ARMenuManager = class extends Component3 {
       this.showProduct(0);
     } else {
       this.hideActiveModel();
+      this.hideImageFallback();
       this.currentProduct = null;
       this.updateUI();
+      this.setStatus("No products found in this category.");
     }
   }
   /* =========================================
    * NEXT / PREVIOUS
    * ========================================= */
   next() {
-    if (this.filteredProducts.length === 0) {
+    if (this.filteredProducts.length === 0)
       return;
-    }
     this.currentIndex = (this.currentIndex + 1) % this.filteredProducts.length;
-    this.showProduct(
-      this.currentIndex
-    );
+    this.showProduct(this.currentIndex);
   }
   prev() {
-    if (this.filteredProducts.length === 0) {
+    if (this.filteredProducts.length === 0)
       return;
-    }
     this.currentIndex = (this.currentIndex - 1 + this.filteredProducts.length) % this.filteredProducts.length;
-    this.showProduct(
-      this.currentIndex
-    );
+    this.showProduct(this.currentIndex);
   }
   /* =========================================
    * SHOW PRODUCT
    * ========================================= */
   async showProduct(index) {
-    if (this.filteredProducts.length === 0) {
+    if (this.filteredProducts.length === 0)
       return;
-    }
     index = Math.max(
       0,
-      Math.min(
-        index,
-        this.filteredProducts.length - 1
-      )
+      Math.min(index, this.filteredProducts.length - 1)
     );
     this.currentIndex = index;
     this.currentProduct = this.filteredProducts[index];
@@ -67451,114 +67433,218 @@ var ARMenuManager = class extends Component3 {
     this.hideImageFallback();
     const requestId = ++this.modelRequestId;
     const product = this.currentProduct;
-    const nameKey = this.sanitizeName(product.name);
-    const cached = this.modelPool.get(nameKey);
-    if (cached) {
-      if (requestId !== this.modelRequestId) {
-        return;
-      }
-      cached.root.active = true;
-      this.activeModelRoot = cached.root;
-      this.placeModel(
-        cached.root
+    if (product.img) {
+      this.showImageFallback(product.img);
+    }
+    const modelId = this.getModelId(product);
+    if (!modelId) {
+      this.setStatus(
+        "No model ID is available for this product."
       );
+      return;
+    }
+    const cachedInstance = this.modelPool.get(modelId);
+    if (cachedInstance) {
+      if (requestId !== this.modelRequestId)
+        return;
+      cachedInstance.lastUsed = Date.now();
+      cachedInstance.root.active = true;
+      this.activeModelRoot = cachedInstance.root;
+      this.placeModel(cachedInstance.root);
       this.applyScaleToCurrent();
+      this.hideImageFallback();
       this.setStatus("");
       return;
     }
-    this.setStatus(
-      "Loading 3D model..."
-    );
-    if (this.loading.has(nameKey)) {
-      return;
-    }
-    this.loading.add(nameKey);
+    this.setStatus("Loading 3D model...");
     try {
-      const url = `${this.r2Base}${nameKey}.glb`;
-      console.log(
-        "Loading GLB:",
-        url
-      );
-      const prefab = await this.engine.loadGLTF({
-        file: url
-      });
-      if (requestId !== this.modelRequestId) {
+      const prefab = await this.ensurePrefab(product);
+      if (requestId !== this.modelRequestId)
         return;
-      }
-      const result = this.engine.scene.instantiate(
-        prefab
-      );
+      const result = this.engine.scene.instantiate(prefab);
       const root = result.root;
       root.parent = this.displayRoot;
-      root.setTranslationLocal([
-        0,
-        0.1,
-        0
-      ]);
+      root.setTranslationLocal([0, 0.1, 0]);
       root.setScalingLocal([
         this.modelScale,
         this.modelScale,
         this.modelScale
       ]);
       root.active = true;
-      this.modelPool.set(
-        nameKey,
-        {
-          root,
-          prefab
-        }
-      );
+      this.modelPool.set(modelId, {
+        root,
+        prefab,
+        lastUsed: Date.now()
+      });
       this.activeModelRoot = root;
       this.applyScaleToCurrent();
+      this.hideImageFallback();
       this.setStatus("");
+      this.evictOldModelInstances(modelId);
+      this.dispatchModelReady(product, true);
     } catch (error) {
       console.warn(
-        `No GLB available for "${nameKey}".`,
+        `ARMenuManager: Could not load GLB for product ID "${modelId}".`,
         error
       );
       if (requestId === this.modelRequestId) {
-        this.showImageFallback(
-          product.img
+        this.showImageFallback(product.img);
+        this.setStatus(
+          product.img ? "Showing product image." : "3D model unavailable."
         );
-        this.setStatus("");
+        this.dispatchModelReady(product, false);
       }
-    } finally {
-      this.loading.delete(nameKey);
     }
   }
   /* =========================================
-   * MODEL VISIBILITY
+   * MODEL ID / PREFAB LOADING
+   * ========================================= */
+  getModelId(product) {
+    return product && product.id ? String(product.id) : "";
+  }
+  getModelUrl(product) {
+    const modelId = this.getModelId(product);
+    return `${this.r2Base}${encodeURIComponent(modelId)}.glb`;
+  }
+  ensurePrefab(product) {
+    const modelId = this.getModelId(product);
+    if (!modelId) {
+      return Promise.reject(
+        new Error("Missing MongoDB product ID.")
+      );
+    }
+    if (this.modelPrefabs.has(modelId)) {
+      return Promise.resolve(
+        this.modelPrefabs.get(modelId)
+      );
+    }
+    if (this.modelLoads.has(modelId)) {
+      return this.modelLoads.get(modelId);
+    }
+    const url = this.getModelUrl(product);
+    console.log(
+      "Loading GLB for product ID:",
+      modelId,
+      url
+    );
+    const loadPromise = this.engine.loadGLTF({ file: url }).then((prefab) => {
+      this.modelPrefabs.set(modelId, prefab);
+      this.dispatchModelReady(product, true);
+      return prefab;
+    }).finally(() => {
+      this.modelLoads.delete(modelId);
+    });
+    this.modelLoads.set(modelId, loadPromise);
+    return loadPromise;
+  }
+  /* =========================================
+   * RESTAURANT-SPECIFIC BACKGROUND PRELOAD
+   * ========================================= */
+  startRestaurantPreload() {
+    for (const product of this.products) {
+      const modelId = this.getModelId(product);
+      if (!modelId || this.modelPrefabs.has(modelId) || this.modelLoads.has(modelId) || this.preloadQueuedIds.has(modelId)) {
+        continue;
+      }
+      this.preloadQueue.push(product);
+      this.preloadQueuedIds.add(modelId);
+    }
+    this.pumpPreloadQueue();
+  }
+  pumpPreloadQueue() {
+    if (this.preloadWorkerRunning)
+      return;
+    this.preloadWorkerRunning = true;
+    const runNext = async () => {
+      try {
+        while (this.preloadQueue.length > 0) {
+          const product = this.preloadQueue.shift();
+          const modelId = this.getModelId(product);
+          this.preloadQueuedIds.delete(modelId);
+          if (!modelId || this.modelPrefabs.has(modelId)) {
+            continue;
+          }
+          try {
+            await this.ensurePrefab(product);
+          } catch (error) {
+            console.warn(
+              `ARMenuManager: Background preload failed for "${modelId}".`,
+              error
+            );
+          }
+        }
+      } finally {
+        this.preloadWorkerRunning = false;
+      }
+    };
+    runNext();
+  }
+  dispatchModelReady(product, available) {
+    window.dispatchEvent(
+      new CustomEvent("armenu-model-ready", {
+        detail: {
+          productId: this.getModelId(product),
+          product,
+          available
+        }
+      })
+    );
+  }
+  /* =========================================
+   * INSTANCE CACHE MANAGEMENT
+   * ========================================= */
+  evictOldModelInstances(keepModelId) {
+    if (this.modelPool.size <= this.maxCachedInstances)
+      return;
+    const candidates = Array.from(this.modelPool.entries()).filter(
+      ([id, entry]) => id !== keepModelId && entry.root !== this.activeModelRoot
+    ).sort(
+      (a, b) => a[1].lastUsed - b[1].lastUsed
+    );
+    while (this.modelPool.size > this.maxCachedInstances && candidates.length > 0) {
+      const [id, entry] = candidates.shift();
+      try {
+        entry.root.active = false;
+        if (typeof entry.root.destroy === "function") {
+          entry.root.destroy();
+        }
+        this.modelPool.delete(id);
+      } catch (error) {
+        console.warn(
+          "ARMenuManager: Could not evict model instance:",
+          id,
+          error
+        );
+        break;
+      }
+    }
+  }
+  /* =========================================
+   * MODEL VISIBILITY / PLACEMENT
    * ========================================= */
   hideActiveModel() {
-    if (!this.activeModelRoot) {
+    if (!this.activeModelRoot)
       return;
-    }
     this.activeModelRoot.active = false;
+    for (const entry of this.modelPool.values()) {
+      if (entry.root === this.activeModelRoot) {
+        entry.lastUsed = Date.now();
+        break;
+      }
+    }
     this.activeModelRoot = null;
   }
-  /* =========================================
-   * MODEL PLACEMENT
-   * ========================================= */
   placeModel(root) {
-    if (!root) {
+    if (!root)
       return;
-    }
-    root.setTranslationLocal([
-      0,
-      0.1,
-      0
-    ]);
+    root.setTranslationLocal([0, 0.1, 0]);
   }
   /* =========================================
    * ROTATION
    * ========================================= */
   update(dt) {
-    if (!this.isRotating) {
+    if (!this.isRotating || !this.activeModelRoot)
       return;
-    }
-    if (!this.activeModelRoot) {
-      return;
-    }
     const angle2 = this.rotateSpeed * dt * (Math.PI / 180);
     this.activeModelRoot.rotateAxisAngleRadObject(
       [0, 1, 0],
@@ -67576,9 +67662,8 @@ var ARMenuManager = class extends Component3 {
    * ========================================= */
   setZoom(factor) {
     const setting = this.zoomSettings[factor];
-    if (!setting) {
+    if (!setting)
       return;
-    }
     this.currentScaleFactor = setting.scale;
     this.applyScaleToCurrent();
     const view = this.engine.scene.mainView;
@@ -67586,23 +67671,18 @@ var ARMenuManager = class extends Component3 {
       view.fov = setting.fov;
     }
     document.querySelectorAll(".zoom-btn").forEach((button) => {
-      button.classList.remove(
-        "active"
-      );
+      button.classList.remove("active");
     });
     let activeId = "zoom-x1";
-    if (factor === 0.5) {
+    if (factor === 0.5)
       activeId = "zoom-x05";
-    }
-    if (factor === 2) {
+    if (factor === 2)
       activeId = "zoom-x2";
-    }
     document.getElementById(activeId)?.classList.add("active");
   }
   applyScaleToCurrent() {
-    if (!this.activeModelRoot) {
+    if (!this.activeModelRoot)
       return;
-    }
     const scale7 = this.modelScale * this.currentScaleFactor;
     this.activeModelRoot.setScalingLocal([
       scale7,
@@ -67617,12 +67697,9 @@ var ARMenuManager = class extends Component3 {
     const container = document.getElementById(
       "product-image-container"
     );
-    const img = document.getElementById(
-      "product-image"
-    );
-    if (!container || !img) {
+    const img = document.getElementById("product-image");
+    if (!container || !img)
       return;
-    }
     if (!imgUrl) {
       container.style.display = "none";
       return;
@@ -67639,8 +67716,10 @@ var ARMenuManager = class extends Component3 {
     }
   }
   /* =========================================
-   * NAME SANITIZATION
+   * LEGACY NAME SANITIZATION
    * ========================================= */
+  // Kept for compatibility with any other script that calls it.
+  // GLB URLs now use MongoDB product IDs, not product names.
   sanitizeName(name) {
     return String(name || "").toLowerCase().trim().replace(/&/g, "and").replace(/\+/g, "plus").replace(/['’]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-");
   }
@@ -67655,25 +67734,18 @@ var ARMenuManager = class extends Component3 {
     if (Number.isNaN(number)) {
       return String(price);
     }
-    return new Intl.NumberFormat(
-      "en-NG",
-      {
-        style: "currency",
-        currency: "NGN",
-        maximumFractionDigits: 0
-      }
-    ).format(number);
+    return new Intl.NumberFormat("en-NG", {
+      style: "currency",
+      currency: "NGN",
+      maximumFractionDigits: 0
+    }).format(number);
   }
   /* =========================================
-   * UI
+   * UI CREATION
    * ========================================= */
   createUI() {
-    document.getElementById(
-      "model-ui-root"
-    )?.remove();
-    document.getElementById(
-      "product-image-container"
-    )?.remove();
+    document.getElementById("model-ui-root")?.remove();
+    document.getElementById("product-image-container")?.remove();
     const imageContainer = document.createElement("div");
     imageContainer.id = "product-image-container";
     imageContainer.style.cssText = `
@@ -67681,25 +67753,15 @@ var ARMenuManager = class extends Component3 {
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-
             z-index: 9998;
-
             display: none;
-
             width: 90%;
             max-width: 600px;
-
             max-height: 55vh;
-
             border-radius: 20px;
-
             overflow: hidden;
-
             background: rgba(0,0,0,0.85);
-
-            box-shadow:
-                0 12px 40px rgba(0,0,0,0.5);
-
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
             pointer-events: none;
         `;
     const image2 = document.createElement("img");
@@ -67707,69 +67769,42 @@ var ARMenuManager = class extends Component3 {
     image2.style.cssText = `
             width: 100%;
             height: auto;
-
             max-height: 55vh;
-
             object-fit: contain;
-
             display: block;
         `;
     imageContainer.appendChild(image2);
-    document.body.appendChild(
-      imageContainer
-    );
+    document.body.appendChild(imageContainer);
     const root = document.createElement("div");
     root.id = "model-ui-root";
     root.style.cssText = `
             position: fixed;
-
             left: 0;
             right: 0;
             bottom: 0;
-
             z-index: 9999;
-
             pointer-events: none;
-
             display: flex;
             flex-direction: column;
-
             align-items: center;
-
-            padding:
-                0 12px
-                max(16px, env(safe-area-inset-right))
+            padding: 0 12px max(16px, env(safe-area-inset-right))
                 max(20px, env(safe-area-inset-bottom))
                 max(16px, env(safe-area-inset-left));
-
-            font-family:
-                system-ui,
-                -apple-system,
-                BlinkMacSystemFont,
-                "Segoe UI",
-                Roboto,
-                sans-serif;
-
+            font-family: system-ui, -apple-system, BlinkMacSystemFont,
+                "Segoe UI", Roboto, sans-serif;
             box-sizing: border-box;
         `;
     const filterPanel = document.createElement("div");
     filterPanel.id = "menu-filter-panel";
     filterPanel.style.cssText = `
             pointer-events: auto;
-
             width: 100%;
             max-width: 520px;
-
             margin-bottom: 8px;
-
             display: flex;
-
             gap: 8px;
-
             overflow-x: auto;
-
             scrollbar-width: none;
-
             padding: 2px;
         `;
     const typeButtons = document.createElement("div");
@@ -67779,183 +67814,97 @@ var ARMenuManager = class extends Component3 {
             flex-shrink: 0;
         `;
     const createFilterButton = (label, value) => {
-      const button = document.createElement(
-        "button"
-      );
+      const button = document.createElement("button");
       button.textContent = label;
       button.dataset.type = value;
       button.style.cssText = `
-                    border: none;
-
-                    padding:
-                        9px 13px;
-
-                    border-radius:
-                        999px;
-
-                    background:
-                        rgba(0,0,0,0.72);
-
-                    color: white;
-
-                    font-size: 13px;
-
-                    font-weight: 600;
-
-                    cursor: pointer;
-
-                    backdrop-filter:
-                        blur(8px);
-
-                    -webkit-backdrop-filter:
-                        blur(8px);
-
-                    white-space: nowrap;
-
-                    touch-action: manipulation;
-                `;
-      button.onclick = () => {
-        this.setType(value);
-      };
+                border: none;
+                padding: 9px 13px;
+                border-radius: 999px;
+                background: rgba(0,0,0,0.72);
+                color: white;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                white-space: nowrap;
+                touch-action: manipulation;
+            `;
+      button.onclick = () => this.setType(value);
       return button;
     };
     typeButtons.appendChild(
-      createFilterButton(
-        "All",
-        "all"
-      )
+      createFilterButton("Meals", "meal")
     );
     typeButtons.appendChild(
-      createFilterButton(
-        "Meals",
-        "meal"
-      )
+      createFilterButton("Drinks", "drink")
     );
-    typeButtons.appendChild(
-      createFilterButton(
-        "Drinks",
-        "drink"
-      )
-    );
-    filterPanel.appendChild(
-      typeButtons
-    );
-    const categorySelect = document.createElement(
-      "select"
-    );
+    filterPanel.appendChild(typeButtons);
+    const categorySelect = document.createElement("select");
     categorySelect.id = "category-select";
     categorySelect.style.cssText = `
             border: none;
-
-            padding:
-                9px 12px;
-
-            border-radius:
-                999px;
-
-            background:
-                rgba(0,0,0,0.72);
-
+            padding: 9px 12px;
+            border-radius: 999px;
+            background: rgba(0,0,0,0.72);
             color: white;
-
             font-size: 13px;
-
             font-weight: 600;
-
             outline: none;
-
             max-width: 180px;
-
-            backdrop-filter:
-                blur(8px);
-
-            -webkit-backdrop-filter:
-                blur(8px);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
         `;
     categorySelect.onchange = () => {
-      this.setCategory(
-        categorySelect.value
-      );
+      this.setCategory(categorySelect.value);
     };
-    filterPanel.appendChild(
-      categorySelect
-    );
-    root.appendChild(
-      filterPanel
-    );
+    filterPanel.appendChild(categorySelect);
+    root.appendChild(filterPanel);
     const panel = document.createElement("div");
     panel.id = "product-panel";
     panel.style.cssText = `
             pointer-events: none;
-
             width: 100%;
-
             max-width: 420px;
-
-            background:
-                rgba(0,0,0,0.72);
-
-            backdrop-filter:
-                blur(10px);
-
-            -webkit-backdrop-filter:
-                blur(10px);
-
-            border-radius:
-                16px;
-
-            padding:
-                14px 18px;
-
-            margin-bottom:
-                10px;
-
+            background: rgba(0,0,0,0.72);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 14px 18px;
+            margin-bottom: 10px;
             color: white;
-
-            box-shadow:
-                0 8px 24px
-                rgba(0,0,0,0.35);
-
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
             box-sizing: border-box;
         `;
     const title = document.createElement("div");
     title.id = "product-title";
     title.style.cssText = `
             font-size: 20px;
-
             font-weight: 700;
-
             margin-bottom: 5px;
-
             line-height: 1.25;
         `;
     const description = document.createElement("div");
     description.id = "product-description";
     description.style.cssText = `
             font-size: 13px;
-
             opacity: 0.9;
-
             line-height: 1.4;
-
             margin-bottom: 8px;
         `;
     const price = document.createElement("div");
     price.id = "product-price";
     price.style.cssText = `
             font-size: 21px;
-
             font-weight: 700;
-
             color: #4ade80;
         `;
     const counter = document.createElement("div");
     counter.id = "product-counter";
     counter.style.cssText = `
             font-size: 11px;
-
             opacity: 0.65;
-
             margin-top: 5px;
         `;
     panel.appendChild(title);
@@ -67967,126 +67916,62 @@ var ARMenuManager = class extends Component3 {
     status.id = "menu-status";
     status.style.cssText = `
             color: white;
-
             font-size: 12px;
-
             margin-bottom: 6px;
-
-            text-shadow:
-                0 2px 5px black;
-
+            text-shadow: 0 2px 5px black;
             min-height: 16px;
         `;
     root.appendChild(status);
     const buttons = document.createElement("div");
     buttons.style.cssText = `
             display: flex;
-
             gap: 8px;
-
             pointer-events: auto;
-
             flex-wrap: wrap;
-
             justify-content: center;
-
             max-width: 520px;
         `;
     const buttonStyle = `
             pointer-events: auto;
-
-            padding:
-                11px 14px;
-
+            padding: 11px 14px;
             font-size: 13px;
-
             font-weight: 600;
-
             border-radius: 12px;
-
             border: none;
-
-            background:
-                rgba(0,0,0,0.75);
-
+            background: rgba(0,0,0,0.75);
             color: white;
-
-            backdrop-filter:
-                blur(6px);
-
-            -webkit-backdrop-filter:
-                blur(6px);
-
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
             cursor: pointer;
-
-            box-shadow:
-                0 4px 14px
-                rgba(0,0,0,0.35);
-
+            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
             user-select: none;
-
             -webkit-user-select: none;
-
             touch-action: manipulation;
-
             min-height: 42px;
         `;
     const prev = document.createElement("button");
     prev.textContent = "\u25C0 Prev";
     prev.style.cssText = buttonStyle;
-    prev.onclick = () => {
-      this.prev();
-    };
+    prev.onclick = () => this.prev();
     const rotate2 = document.createElement("button");
     rotate2.textContent = "\u{1F504} Hold to Rotate";
     rotate2.style.cssText = buttonStyle;
-    rotate2.addEventListener(
-      "mousedown",
-      (event) => {
-        event.preventDefault();
-        this.startRotation();
-      }
-    );
-    rotate2.addEventListener(
-      "mouseup",
-      () => {
-        this.stopRotation();
-      }
-    );
-    rotate2.addEventListener(
-      "mouseleave",
-      () => {
-        this.stopRotation();
-      }
-    );
-    rotate2.addEventListener(
-      "touchstart",
-      (event) => {
-        event.preventDefault();
-        this.startRotation();
-      },
-      {
-        passive: false
-      }
-    );
-    rotate2.addEventListener(
-      "touchend",
-      () => {
-        this.stopRotation();
-      }
-    );
-    rotate2.addEventListener(
-      "touchcancel",
-      () => {
-        this.stopRotation();
-      }
-    );
+    rotate2.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      this.startRotation();
+    });
+    rotate2.addEventListener("mouseup", () => this.stopRotation());
+    rotate2.addEventListener("mouseleave", () => this.stopRotation());
+    rotate2.addEventListener("touchstart", (event) => {
+      event.preventDefault();
+      this.startRotation();
+    }, { passive: false });
+    rotate2.addEventListener("touchend", () => this.stopRotation());
+    rotate2.addEventListener("touchcancel", () => this.stopRotation());
     const next = document.createElement("button");
     next.textContent = "Next \u25B6";
     next.style.cssText = buttonStyle;
-    next.onclick = () => {
-      this.next();
-    };
+    next.onclick = () => this.next();
     buttons.appendChild(prev);
     buttons.appendChild(rotate2);
     buttons.appendChild(next);
@@ -68094,52 +67979,30 @@ var ARMenuManager = class extends Component3 {
     const zoomRow = document.createElement("div");
     zoomRow.style.cssText = `
             display: flex;
-
             gap: 7px;
-
             pointer-events: auto;
-
             margin-top: 8px;
-
             justify-content: center;
         `;
     const createZoomButton = (id, label, factor) => {
-      const button = document.createElement(
-        "button"
-      );
+      const button = document.createElement("button");
       button.id = id;
       button.className = "zoom-btn";
       button.textContent = label;
       button.style.cssText = buttonStyle;
-      button.onclick = () => {
-        this.setZoom(factor);
-      };
+      button.onclick = () => this.setZoom(factor);
       return button;
     };
     zoomRow.appendChild(
-      createZoomButton(
-        "zoom-x05",
-        "\xD70.5",
-        0.5
-      )
+      createZoomButton("zoom-x05", "\xD70.5", 0.5)
     );
     zoomRow.appendChild(
-      createZoomButton(
-        "zoom-x1",
-        "\xD71",
-        1
-      )
+      createZoomButton("zoom-x1", "\xD71", 1)
     );
     zoomRow.appendChild(
-      createZoomButton(
-        "zoom-x2",
-        "\xD72",
-        2
-      )
+      createZoomButton("zoom-x2", "\xD72", 2)
     );
-    root.appendChild(
-      zoomRow
-    );
+    root.appendChild(zoomRow);
     document.body.appendChild(root);
     this.updateFilterUI();
   }
@@ -68147,27 +68010,18 @@ var ARMenuManager = class extends Component3 {
    * UPDATE FILTER UI
    * ========================================= */
   updateFilterUI() {
-    const select4 = document.getElementById(
-      "category-select"
-    );
-    if (!select4) {
+    const select4 = document.getElementById("category-select");
+    if (!select4)
       return;
-    }
     select4.innerHTML = "";
     for (const category of this.categories) {
-      const option = document.createElement(
-        "option"
-      );
+      const option = document.createElement("option");
       option.value = category;
-      option.textContent = category === "all" ? "All Categories" : category;
+      option.textContent = category === "all" ? this.currentType === "meal" ? "All Meal Categories" : "All Drink Categories" : category;
       option.selected = category === this.currentCategory;
-      select4.appendChild(
-        option
-      );
+      select4.appendChild(option);
     }
-    document.querySelectorAll(
-      "[data-type]"
-    ).forEach((button) => {
+    document.querySelectorAll("[data-type]").forEach((button) => {
       const active = button.dataset.type === this.currentType;
       if (active) {
         button.style.background = "rgba(74,222,128,0.85)";
@@ -68182,21 +68036,12 @@ var ARMenuManager = class extends Component3 {
    * UPDATE PRODUCT UI
    * ========================================= */
   updateUI() {
-    const title = document.getElementById(
-      "product-title"
-    );
-    const description = document.getElementById(
-      "product-description"
-    );
-    const price = document.getElementById(
-      "product-price"
-    );
-    const counter = document.getElementById(
-      "product-counter"
-    );
-    if (!title || !description || !price || !counter) {
+    const title = document.getElementById("product-title");
+    const description = document.getElementById("product-description");
+    const price = document.getElementById("product-price");
+    const counter = document.getElementById("product-counter");
+    if (!title || !description || !price || !counter)
       return;
-    }
     if (!this.currentProduct) {
       title.textContent = "";
       description.textContent = "";
@@ -68206,33 +68051,24 @@ var ARMenuManager = class extends Component3 {
     }
     title.textContent = this.currentProduct.name;
     description.textContent = this.currentProduct.desc;
-    price.textContent = this.formatPrice(
-      this.currentProduct.price
-    );
+    price.textContent = this.formatPrice(this.currentProduct.price);
     counter.textContent = `${this.currentIndex + 1} / ${this.filteredProducts.length}`;
-    window.dispatchEvent(
-      new CustomEvent(
-        "armenu-update",
-        {
-          detail: {
-            product: this.currentProduct,
-            index: this.currentIndex,
-            total: this.filteredProducts.length,
-            categories: this.categories,
-            type: this.currentType,
-            category: this.currentCategory
-          }
-        }
-      )
-    );
+    window.dispatchEvent(new CustomEvent("armenu-update", {
+      detail: {
+        product: this.currentProduct,
+        index: this.currentIndex,
+        total: this.filteredProducts.length,
+        categories: this.categories,
+        type: this.currentType,
+        category: this.currentCategory
+      }
+    }));
   }
   /* =========================================
    * STATUS
    * ========================================= */
   setStatus(message) {
-    const status = document.getElementById(
-      "menu-status"
-    );
+    const status = document.getElementById("menu-status");
     if (status) {
       status.textContent = message || "";
     }
