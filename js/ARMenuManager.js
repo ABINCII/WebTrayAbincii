@@ -1,4 +1,5 @@
-import {Component, Property} from '@wonderlandengine/api';
+
+import { Component, Property } from '@wonderlandengine/api';
 
 export class ARMenuManager extends Component {
     static TypeName = 'ar-menu-manager';
@@ -6,109 +7,54 @@ export class ARMenuManager extends Component {
     static Properties = {
         apiBase: Property.string('https://api.abincii.com/api'),
 
+        // You can enter either the R2 domain or the full /models/ URL.
+        // getModelUrl() normalizes both forms automatically.
         r2Base: Property.string(
-            'https://https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models/'
+            'https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models/'
         ),
 
         displayRoot: Property.object(),
-
         modelScale: Property.float(0.3),
-
         rotateSpeed: Property.float(90.0),
     };
 
     init() {
-        /* ================================
-         * PRODUCT DATA
-         * ================================ */
-
         this.products = [];
         this.filteredProducts = [];
         this.categories = [];
 
-        /* ================================
-         * FILTER STATE
-         * ================================ */
-
-        this.currentType = 'all';
+        this.currentType = 'meal';
         this.currentCategory = 'all';
-
-        /* ================================
-         * CURRENT PRODUCT
-         * ================================ */
-
         this.currentIndex = 0;
         this.currentProduct = null;
 
-        /* ================================
-         * MODEL STATE
-         * ================================ */
-
         this.modelPool = new Map();
+        this.modelPrefabs = new Map();
+        this.modelLoads = new Map();
+
         this.activeModelRoot = null;
-
-        /*
-         * Prevent multiple requests for
-         * the same model.
-         */
-        this.loading = new Set();
-
-        /*
-         * Used to prevent an old async GLB
-         * request from becoming active after
-         * the user has already moved to another
-         * product.
-         */
         this.modelRequestId = 0;
 
-        /* ================================
-         * ROTATION
-         * ================================ */
+        this.preloadQueue = [];
+        this.preloadQueuedIds = new Set();
+        this.preloadWorkerRunning = false;
 
+        this.maxCachedInstances = 8;
         this.isRotating = false;
-
-        /* ================================
-         * ZOOM
-         * ================================ */
-
         this.currentScaleFactor = 1.0;
 
         this.zoomSettings = {
-            0.5: {
-                scale: 0.5,
-                fov: 85
-            },
-
-            1.0: {
-                scale: 1.0,
-                fov: 60
-            },
-
-            2.0: {
-                scale: 2.0,
-                fov: 75
-            }
+            0.5: { scale: 0.5, fov: 85 },
+            1.0: { scale: 1.0, fov: 60 },
+            2.0: { scale: 2.0, fov: 75 },
         };
     }
 
     async start() {
-        /*
-         * Create UI immediately.
-         */
         this.createUI();
-
-        /*
-         * Expose manager to browser UI.
-         */
         window.arMenu = this;
 
-        /*
-         * Read QR parameters.
-         */
-        const params = new URLSearchParams(
-            window.location.search
-        );
-
+        const params = new URLSearchParams(window.location.search);
         this.restaurantId = params.get('restaurant');
         this.tableId = params.get('table');
 
@@ -116,529 +62,571 @@ export class ARMenuManager extends Component {
             console.error(
                 'ARMenuManager: No restaurant ID found in URL.'
             );
-
-            this.setStatus(
-                'No restaurant ID was provided.'
-            );
-
+            this.setStatus('No restaurant ID was provided.');
             return;
         }
 
-        console.log(
-            'Restaurant:',
-            this.restaurantId
-        );
+        console.log('Restaurant:', this.restaurantId);
+        console.log('Table:', this.tableId);
+        console.log('Configured R2 base:', this.r2Base);
 
-        console.log(
-            'Table:',
-            this.tableId
-        );
-
-        /*
-         * Start with normal zoom.
-         */
         this.setZoom(1.0);
 
-        /*
-         * Fetch menu.
-         */
         await this.fetchMenu(this.restaurantId);
 
-        /*
-         * Build category list.
-         */
         this.buildCategories();
-
-        /*
-         * Apply initial filters.
-         */
         this.applyFilters();
 
-        /*
-         * Show first product.
-         */
         if (this.filteredProducts.length > 0) {
             this.showProduct(0);
+            this.startRestaurantPreload();
         } else {
             this.setStatus(
-                'No menu items were found.'
+                this.currentType === 'meal'
+                    ? 'No meals found. Select Drinks to view drinks.'
+                    : 'No drinks found. Select Meals to view meals.'
             );
         }
     }
 
     /* =========================================
-     * FETCH MENU
+     * FETCH RESTAURANT MENU
      * ========================================= */
 
     async fetchMenu(restaurantId) {
         try {
             this.setStatus('Loading menu...');
 
+            const base = String(this.apiBase || '').replace(/\/+$/, '');
             const url =
-                `${this.apiBase}/restaurants/menu` +
+                `${base}/restaurants/menu` +
                 `?restaurant=${encodeURIComponent(restaurantId)}`;
-
-            console.log(
-                'Fetching menu:',
-                url
-            );
 
             const response = await fetch(url);
 
             if (!response.ok) {
-                throw new Error(
-                    `HTTP ${response.status}`
-                );
+                throw new Error(`Menu API returned HTTP ${response.status}`);
             }
 
             const data = await response.json();
 
             if (!data.success) {
-                throw new Error(
-                    'Backend returned success=false'
-                );
+                throw new Error('Backend returned success=false');
             }
 
-            /*
-             * Convert meals into common product format.
-             */
             const meals = (data.meal || []).map(meal => ({
                 type: 'meal',
-
-                id: meal._id,
-
+                id: String(meal._id || ''),
                 name: meal.mealName || 'Unnamed Meal',
-
                 desc: meal.desc || '',
-
                 price: meal.price,
-
-                category:
-                    meal.category ||
-                    'Uncategorized',
-
+                category: meal.category || 'Uncategorized',
                 img: meal.mealImg || '',
-
-                raw: meal
+                raw: meal,
             }));
 
-            /*
-             * Convert drinks into common product format.
-             */
             const drinks = (data.drink || []).map(drink => ({
                 type: 'drink',
-
-                id: drink._id,
-
+                id: String(drink._id || ''),
                 name: drink.drinkName || 'Unnamed Drink',
-
                 desc: drink.desc || '',
-
                 price: drink.price,
-
-                category:
-                    drink.category ||
-                    'Uncategorized',
-
+                category: drink.category || 'Uncategorized',
                 img: drink.drinkImg || '',
-
-                raw: drink
+                raw: drink,
             }));
 
-            /*
-             * Combine everything.
-             */
-            this.products = [
-                ...meals,
-                ...drinks
-            ];
+            // The endpoint has already scoped this catalogue to the restaurant.
+            this.products = [...meals, ...drinks].filter(p => p.id);
 
             console.log(
-                `Loaded ${this.products.length} products`
+                `Loaded ${this.products.length} products for restaurant ${restaurantId}`,
+                {
+                    meals: meals.length,
+                    drinks: drinks.length,
+                }
             );
 
             this.setStatus('');
-
         } catch (error) {
-            console.error(
-                'ARMenuManager: Failed to fetch menu:',
-                error
-            );
-
+            console.error('ARMenuManager: Failed to fetch menu:', error);
             this.products = [];
-
-            this.setStatus(
-                'Unable to load menu.'
-            );
+            this.setStatus('Unable to load menu. Check the API connection.');
         }
     }
 
     /* =========================================
-     * CATEGORY GENERATION
+     * CATEGORY FILTERING
      * ========================================= */
 
     buildCategories() {
         const categorySet = new Set();
 
         for (const product of this.products) {
-            if (product.category) {
+            if (
+                product.type === this.currentType &&
+                product.category
+            ) {
                 categorySet.add(product.category);
             }
         }
 
         this.categories = [
             'all',
-            ...Array.from(categorySet).sort()
+            ...Array.from(categorySet).sort((a, b) =>
+                String(a).localeCompare(String(b))
+            ),
         ];
-    }
 
-    /* =========================================
-     * FILTERING
-     * ========================================= */
-
-    applyFilters() {
-        this.filteredProducts =
-            this.products.filter(product => {
-
-                const typeMatches =
-                    this.currentType === 'all' ||
-                    product.type === this.currentType;
-
-                const categoryMatches =
-                    this.currentCategory === 'all' ||
-                    product.category === this.currentCategory;
-
-                return (
-                    typeMatches &&
-                    categoryMatches
-                );
-            });
-
-        this.currentIndex = 0;
+        if (
+            this.currentCategory !== 'all' &&
+            !categorySet.has(this.currentCategory)
+        ) {
+            this.currentCategory = 'all';
+        }
 
         this.updateFilterUI();
+    }
 
+    applyFilters() {
+        this.filteredProducts = this.products.filter(product => {
+            const typeMatches = product.type === this.currentType;
+            const categoryMatches =
+                this.currentCategory === 'all' ||
+                product.category === this.currentCategory;
+
+            return typeMatches && categoryMatches;
+        });
+
+        this.currentIndex = 0;
+        this.updateFilterUI();
         this.updateUI();
     }
 
     setType(type) {
-        this.currentType = type;
+        if (type !== 'meal' && type !== 'drink') {
+            console.warn(
+                'ARMenuManager: Type must be "meal" or "drink".'
+            );
+            return;
+        }
 
-        /*
-         * When changing meal/drink,
-         * reset category.
-         */
+        this.currentType = type;
         this.currentCategory = 'all';
 
+        this.buildCategories();
         this.applyFilters();
 
         if (this.filteredProducts.length > 0) {
             this.showProduct(0);
         } else {
             this.hideActiveModel();
-
+            this.hideImageFallback();
             this.currentProduct = null;
-
             this.updateUI();
+
+            this.setStatus(
+                type === 'meal'
+                    ? 'No meals found. Select Drinks to view drinks.'
+                    : 'No drinks found. Select Meals to view meals.'
+            );
         }
     }
 
     setCategory(category) {
         this.currentCategory = category;
-
         this.applyFilters();
 
         if (this.filteredProducts.length > 0) {
             this.showProduct(0);
         } else {
             this.hideActiveModel();
-
+            this.hideImageFallback();
             this.currentProduct = null;
-
             this.updateUI();
+            this.setStatus('No products found in this category.');
         }
     }
 
     /* =========================================
-     * NEXT / PREVIOUS
+     * PRODUCT NAVIGATION
      * ========================================= */
 
     next() {
-        if (this.filteredProducts.length === 0) {
-            return;
-        }
+        if (!this.filteredProducts.length) return;
 
         this.currentIndex =
-            (this.currentIndex + 1) %
-            this.filteredProducts.length;
+            (this.currentIndex + 1) % this.filteredProducts.length;
 
-        this.showProduct(
-            this.currentIndex
-        );
+        this.showProduct(this.currentIndex);
     }
 
     prev() {
-        if (this.filteredProducts.length === 0) {
-            return;
-        }
+        if (!this.filteredProducts.length) return;
 
         this.currentIndex =
-            (
-                this.currentIndex -
-                1 +
-                this.filteredProducts.length
-            ) %
+            (this.currentIndex - 1 + this.filteredProducts.length) %
             this.filteredProducts.length;
 
-        this.showProduct(
-            this.currentIndex
-        );
+        this.showProduct(this.currentIndex);
     }
 
     /* =========================================
-     * SHOW PRODUCT
+     * PRODUCT ID AND CORRECTED R2 URL
+     * ========================================= */
+
+    getModelId(product) {
+        return product && product.id ? String(product.id) : '';
+    }
+
+    getModelUrl(product) {
+        const modelId = this.getModelId(product);
+
+        if (!modelId) {
+            throw new Error('Missing MongoDB product ID.');
+        }
+
+        /*
+         * FIX:
+         * Handles all of these Inspector values:
+         *
+         * https://example.r2.dev
+         * https://example.r2.dev/
+         * https://example.r2.dev/models
+         * https://example.r2.dev/models/
+         *
+         * All produce:
+         * https://example.r2.dev/models/PRODUCT_ID.glb
+         */
+        let base = String(this.r2Base || '').trim();
+
+        if (!base) {
+            throw new Error('R2 base URL is empty.');
+        }
+
+        base = base.replace(/\/+$/, '');
+
+        if (!/\/models$/i.test(base)) {
+            base += '/models';
+        }
+
+        const url = `${base}/${encodeURIComponent(modelId)}.glb`;
+
+        console.log('Constructed GLB URL:', url);
+
+        return url;
+    }
+
+    /* =========================================
+     * LOAD AND CACHE GLB PREFABS
+     * ========================================= */
+
+    ensurePrefab(product) {
+        const modelId = this.getModelId(product);
+
+        if (!modelId) {
+            return Promise.reject(
+                new Error('Missing MongoDB product ID.')
+            );
+        }
+
+        if (this.modelPrefabs.has(modelId)) {
+            return Promise.resolve(this.modelPrefabs.get(modelId));
+        }
+
+        // Reuse an in-progress load for the same product.
+        if (this.modelLoads.has(modelId)) {
+            return this.modelLoads.get(modelId);
+        }
+
+        let url;
+
+        try {
+            url = this.getModelUrl(product);
+        } catch (error) {
+            return Promise.reject(error);
+        }
+
+        console.log(
+            `Loading GLB for product ID: ${modelId}`,
+            url
+        );
+
+        const loadPromise = this.engine.loadGLTF({ file: url })
+            .then(prefab => {
+                this.modelPrefabs.set(modelId, prefab);
+                this.dispatchModelReady(product, true);
+                return prefab;
+            })
+            .catch(error => {
+                console.error(
+                    `ARMenuManager: GLB load failed for "${modelId}".`,
+                    {
+                        url,
+                        error,
+                    }
+                );
+
+                throw error;
+            })
+            .finally(() => {
+                this.modelLoads.delete(modelId);
+            });
+
+        this.modelLoads.set(modelId, loadPromise);
+
+        return loadPromise;
+    }
+
+    /* =========================================
+     * SHOW SELECTED PRODUCT
      * ========================================= */
 
     async showProduct(index) {
-        if (
-            this.filteredProducts.length === 0
-        ) {
-            return;
-        }
+        if (!this.filteredProducts.length) return;
 
-        /*
-         * Clamp index.
-         */
         index = Math.max(
             0,
-            Math.min(
-                index,
-                this.filteredProducts.length - 1
-            )
+            Math.min(index, this.filteredProducts.length - 1)
         );
 
         this.currentIndex = index;
+        this.currentProduct = this.filteredProducts[index];
 
-        this.currentProduct =
-            this.filteredProducts[index];
-
-        /*
-         * Update text immediately.
-         */
         this.updateUI();
-
-        /*
-         * Hide old model.
-         */
         this.hideActiveModel();
-
-        /*
-         * Hide image fallback.
-         */
         this.hideImageFallback();
 
-        /*
-         * New async request ID.
-         */
-        const requestId =
-            ++this.modelRequestId;
+        const requestId = ++this.modelRequestId;
+        const product = this.currentProduct;
+        const modelId = this.getModelId(product);
 
-        const product =
-            this.currentProduct;
+        if (product.img) {
+            this.showImageFallback(product.img);
+        }
 
-        const nameKey =
-            this.sanitizeName(product.name);
+        if (!modelId) {
+            this.setStatus('No model ID is available for this product.');
+            this.dispatchModelReady(product, false);
+            return;
+        }
 
-        /*
-         * Check cached model.
-         */
-        const cached =
-            this.modelPool.get(nameKey);
+        // Reuse an already-instantiated scene object when possible.
+        const cached = this.modelPool.get(modelId);
 
         if (cached) {
-            /*
-             * If user changed product while
-             * loading another model, don't
-             * activate stale model.
-             */
-            if (
-                requestId !== this.modelRequestId
-            ) {
-                return;
-            }
+            if (requestId !== this.modelRequestId) return;
 
+            cached.lastUsed = Date.now();
             cached.root.active = true;
+            this.activeModelRoot = cached.root;
 
-            this.activeModelRoot =
-                cached.root;
-
-            this.placeModel(
-                cached.root
-            );
-
+            this.placeModel(cached.root);
             this.applyScaleToCurrent();
-
+            this.hideImageFallback();
             this.setStatus('');
-
             return;
         }
 
-        /*
-         * Show loading state.
-         */
-        this.setStatus(
-            'Loading 3D model...'
-        );
-
-        /*
-         * Prevent duplicate request.
-         */
-        if (this.loading.has(nameKey)) {
-            return;
-        }
-
-        this.loading.add(nameKey);
+        this.setStatus('Loading 3D model...');
 
         try {
-            const url =
-                `${this.r2Base}${nameKey}.glb`;
+            const prefab = await this.ensurePrefab(product);
 
-            console.log(
-                'Loading GLB:',
-                url
-            );
+            // The user may have selected another product during loading.
+            if (requestId !== this.modelRequestId) return;
 
-            /*
-             * Runtime GLTF loading.
-             */
-            const prefab =
-                await this.engine.loadGLTF({
-                    file: url
-                });
+            const result = this.engine.scene.instantiate(prefab);
+            const root = result.root;
 
-            /*
-             * User may have selected another
-             * product while the GLB was loading.
-             */
-            if (
-                requestId !== this.modelRequestId
-            ) {
-                return;
+            if (!root) {
+                throw new Error('GLB prefab did not create a root object.');
             }
 
-            /*
-             * Instantiate GLB.
-             */
-            const result =
-                this.engine.scene.instantiate(
-                    prefab
-                );
+            root.parent = this.displayRoot;
+            root.setTranslationLocal([0, 0.1, 0]);
 
-            const root =
-                result.root;
+            const scale = this.modelScale * this.currentScaleFactor;
 
-            /*
-             * Parent to AR display root.
-             */
-            root.parent =
-                this.displayRoot;
-
-            /*
-             * Set initial local transform.
-             */
-            root.setTranslationLocal([
-                0,
-                0.1,
-                0
-            ]);
-
-            root.setScalingLocal([
-                this.modelScale,
-                this.modelScale,
-                this.modelScale
-            ]);
-
+            root.setScalingLocal([scale, scale, scale]);
             root.active = true;
 
-            /*
-             * Store in pool.
-             */
-            this.modelPool.set(
-                nameKey,
-                {
-                    root,
-                    prefab
-                }
-            );
+            this.modelPool.set(modelId, {
+                root,
+                prefab,
+                lastUsed: Date.now(),
+            });
 
-            this.activeModelRoot =
-                root;
-
-            /*
-             * Apply selected zoom.
-             */
-            this.applyScaleToCurrent();
-
+            this.activeModelRoot = root;
+            this.hideImageFallback();
             this.setStatus('');
 
+            this.evictOldModelInstances(modelId);
+            this.dispatchModelReady(product, true);
         } catch (error) {
-            /*
-             * GLB doesn't exist or couldn't
-             * be downloaded.
-             */
-            console.warn(
-                `No GLB available for "${nameKey}".`,
+            console.error(
+                `ARMenuManager: Could not display GLB "${modelId}".`,
                 error
             );
 
-            /*
-             * Only show fallback if this is
-             * still the current product.
-             */
-            if (
-                requestId === this.modelRequestId
-            ) {
-                this.showImageFallback(
+            if (requestId === this.modelRequestId) {
+                this.showImageFallback(product.img);
+
+                this.setStatus(
                     product.img
+                        ? '3D model unavailable. Showing product image.'
+                        : '3D model unavailable. Check the GLB URL and R2 access.'
                 );
 
-                this.setStatus('');
+                this.dispatchModelReady(product, false);
             }
-
-        } finally {
-            this.loading.delete(nameKey);
         }
     }
 
     /* =========================================
-     * MODEL VISIBILITY
+     * RESTAURANT-SPECIFIC BACKGROUND PRELOAD
      * ========================================= */
 
-    hideActiveModel() {
-        if (!this.activeModelRoot) {
-            return;
+    startRestaurantPreload() {
+        // Only preload products returned by this restaurant's menu API.
+        for (const product of this.products) {
+            const id = this.getModelId(product);
+
+            if (
+                !id ||
+                this.modelPrefabs.has(id) ||
+                this.modelLoads.has(id) ||
+                this.preloadQueuedIds.has(id)
+            ) {
+                continue;
+            }
+
+            this.preloadQueue.push(product);
+            this.preloadQueuedIds.add(id);
         }
 
-        this.activeModelRoot.active =
-            false;
+        console.log(
+            `ARMenuManager: Queued ${this.preloadQueue.length} models for background preload.`
+        );
+
+        this.pumpPreloadQueue();
+    }
+
+    pumpPreloadQueue() {
+        if (this.preloadWorkerRunning) return;
+
+        this.preloadWorkerRunning = true;
+
+        const runNext = async () => {
+            try {
+                while (this.preloadQueue.length > 0) {
+                    const product = this.preloadQueue.shift();
+                    const id = this.getModelId(product);
+
+                    this.preloadQueuedIds.delete(id);
+
+                    if (!id || this.modelPrefabs.has(id)) {
+                        continue;
+                    }
+
+                    try {
+                        // Load one model at a time to reduce mobile contention.
+                        await this.ensurePrefab(product);
+                        console.log(
+                            `ARMenuManager: Preloaded model "${id}".`
+                        );
+                    } catch (error) {
+                        // Include the URL and actual error for easier debugging.
+                        let url = 'URL unavailable';
+
+                        try {
+                            url = this.getModelUrl(product);
+                        } catch (_) {
+                            // The original error will be logged below.
+                        }
+
+                        console.error(
+                            `ARMenuManager: Background preload failed for "${id}".`,
+                            { url, error }
+                        );
+                    }
+                }
+            } finally {
+                this.preloadWorkerRunning = false;
+            }
+        };
+
+        runNext();
+    }
+
+    dispatchModelReady(product, available) {
+        window.dispatchEvent(
+            new CustomEvent('armenu-model-ready', {
+                detail: {
+                    productId: this.getModelId(product),
+                    product,
+                    available,
+                },
+            })
+        );
+    }
+
+    /* =========================================
+     * INSTANCE CACHE MANAGEMENT
+     * ========================================= */
+
+    evictOldModelInstances(keepModelId) {
+        if (this.modelPool.size <= this.maxCachedInstances) return;
+
+        const candidates = Array.from(this.modelPool.entries())
+            .filter(([id, entry]) =>
+                id !== keepModelId &&
+                entry.root !== this.activeModelRoot
+            )
+            .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+
+        while (
+            this.modelPool.size > this.maxCachedInstances &&
+            candidates.length > 0
+        ) {
+            const [id, entry] = candidates.shift();
+
+            try {
+                entry.root.active = false;
+
+                if (typeof entry.root.destroy === 'function') {
+                    entry.root.destroy();
+                }
+
+                this.modelPool.delete(id);
+            } catch (error) {
+                console.warn(
+                    `ARMenuManager: Could not evict model "${id}".`,
+                    error
+                );
+                break;
+            }
+        }
+    }
+
+    hideActiveModel() {
+        if (!this.activeModelRoot) return;
+
+        this.activeModelRoot.active = false;
+
+        for (const entry of this.modelPool.values()) {
+            if (entry.root === this.activeModelRoot) {
+                entry.lastUsed = Date.now();
+                break;
+            }
+        }
 
         this.activeModelRoot = null;
     }
 
-    /* =========================================
-     * MODEL PLACEMENT
-     * ========================================= */
-
     placeModel(root) {
-        if (!root) {
-            return;
-        }
-
-        root.setTranslationLocal([
-            0,
-            0.1,
-            0
-        ]);
+        if (!root) return;
+        root.setTranslationLocal([0, 0.1, 0]);
     }
 
     /* =========================================
@@ -646,18 +634,9 @@ export class ARMenuManager extends Component {
      * ========================================= */
 
     update(dt) {
-        if (!this.isRotating) {
-            return;
-        }
+        if (!this.isRotating || !this.activeModelRoot) return;
 
-        if (!this.activeModelRoot) {
-            return;
-        }
-
-        const angle =
-            this.rotateSpeed *
-            dt *
-            (Math.PI / 180);
+        const angle = this.rotateSpeed * dt * (Math.PI / 180);
 
         this.activeModelRoot.rotateAxisAngleRadObject(
             [0, 1, 0],
@@ -678,129 +657,78 @@ export class ARMenuManager extends Component {
      * ========================================= */
 
     setZoom(factor) {
-        const setting =
-            this.zoomSettings[factor];
+        const setting = this.zoomSettings[factor];
+        if (!setting) return;
 
-        if (!setting) {
-            return;
-        }
-
-        this.currentScaleFactor =
-            setting.scale;
-
+        this.currentScaleFactor = setting.scale;
         this.applyScaleToCurrent();
 
-        /*
-         * Main Wonderland view.
-         */
-        const view =
-            this.engine.scene.mainView;
+        const view = this.engine.scene.mainView;
 
         if (view) {
-            view.fov =
-                setting.fov;
+            view.fov = setting.fov;
         }
 
-        /*
-         * Update button state.
-         */
-        document
-            .querySelectorAll('.zoom-btn')
-            .forEach(button => {
-                button.classList.remove(
-                    'active'
-                );
-            });
+        document.querySelectorAll('.zoom-btn').forEach(button => {
+            button.classList.remove('active');
+        });
 
-        let activeId = 'zoom-x1';
+        const activeId =
+            factor === 0.5
+                ? 'zoom-x05'
+                : factor === 2.0
+                    ? 'zoom-x2'
+                    : 'zoom-x1';
 
-        if (factor === 0.5) {
-            activeId = 'zoom-x05';
-        }
-
-        if (factor === 2.0) {
-            activeId = 'zoom-x2';
-        }
-
-        document
-            .getElementById(activeId)
-            ?.classList.add('active');
+        document.getElementById(activeId)?.classList.add('active');
     }
 
     applyScaleToCurrent() {
-        if (!this.activeModelRoot) {
-            return;
-        }
+        if (!this.activeModelRoot) return;
 
-        const scale =
-            this.modelScale *
-            this.currentScaleFactor;
+        const scale = this.modelScale * this.currentScaleFactor;
 
         this.activeModelRoot.setScalingLocal([
             scale,
             scale,
-            scale
+            scale,
         ]);
     }
 
     /* =========================================
-     * IMAGE FALLBACK
+     * 2D IMAGE FALLBACK
      * ========================================= */
 
     showImageFallback(imgUrl) {
-        const container =
-            document.getElementById(
-                'product-image-container'
-            );
+        const container = document.getElementById(
+            'product-image-container'
+        );
+        const img = document.getElementById('product-image');
 
-        const img =
-            document.getElementById(
-                'product-image'
-            );
-
-        if (!container || !img) {
-            return;
-        }
+        if (!container || !img) return;
 
         if (!imgUrl) {
-            container.style.display =
-                'none';
-
+            container.style.display = 'none';
             return;
         }
 
-        img.src = imgUrl;
+        img.onerror = () => {
+            container.style.display = 'none';
+            console.warn('ARMenuManager: Product image failed to load:', imgUrl);
+        };
 
-        container.style.display =
-            'block';
+        img.src = imgUrl;
+        container.style.display = 'block';
     }
 
     hideImageFallback() {
-        const container =
-            document.getElementById(
-                'product-image-container'
-            );
+        const container = document.getElementById(
+            'product-image-container'
+        );
 
         if (container) {
-            container.style.display =
-                'none';
+            container.style.display = 'none';
         }
-    }
-
-    /* =========================================
-     * NAME SANITIZATION
-     * ========================================= */
-
-    sanitizeName(name) {
-        return String(name || '')
-            .toLowerCase()
-            .trim()
-            .replace(/&/g, 'and')
-            .replace(/\+/g, 'plus')
-            .replace(/['’]/g, '')
-            .replace(/\s+/g, '-')
-            .replace(/[^a-z0-9-]/g, '')
-            .replace(/-+/g, '-');
     }
 
     /* =========================================
@@ -808,695 +736,307 @@ export class ARMenuManager extends Component {
      * ========================================= */
 
     formatPrice(price) {
-        if (
-            price === null ||
-            price === undefined ||
-            price === ''
-        ) {
+        if (price === null || price === undefined || price === '') {
             return '—';
         }
 
-        const number =
-            Number(price);
+        const number = Number(price);
 
         if (Number.isNaN(number)) {
             return String(price);
         }
 
-        return new Intl.NumberFormat(
-            'en-NG',
-            {
-                style: 'currency',
-                currency: 'NGN',
-                maximumFractionDigits: 0
-            }
-        ).format(number);
+        return new Intl.NumberFormat('en-NG', {
+            style: 'currency',
+            currency: 'NGN',
+            maximumFractionDigits: 0,
+        }).format(number);
     }
 
     /* =========================================
-     * UI
+     * UI CREATION
      * ========================================= */
 
     createUI() {
-        /*
-         * Remove old UI if present.
-         */
-        document
-            .getElementById(
-                'model-ui-root'
-            )
-            ?.remove();
+        document.getElementById('model-ui-root')?.remove();
+        document.getElementById('product-image-container')?.remove();
 
-        document
-            .getElementById(
-                'product-image-container'
-            )
-            ?.remove();
-
-        /* =====================================
-         * IMAGE FALLBACK
-         * ===================================== */
-
-        const imageContainer =
-            document.createElement('div');
-
-        imageContainer.id =
-            'product-image-container';
-
+        const imageContainer = document.createElement('div');
+        imageContainer.id = 'product-image-container';
         imageContainer.style.cssText = `
             position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-
             z-index: 9998;
-
             display: none;
-
             width: 90%;
             max-width: 600px;
-
             max-height: 55vh;
-
             border-radius: 20px;
-
             overflow: hidden;
-
             background: rgba(0,0,0,0.85);
-
-            box-shadow:
-                0 12px 40px rgba(0,0,0,0.5);
-
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
             pointer-events: none;
         `;
 
-        const image =
-            document.createElement('img');
-
-        image.id =
-            'product-image';
-
+        const image = document.createElement('img');
+        image.id = 'product-image';
+        image.alt = 'Product image';
         image.style.cssText = `
             width: 100%;
             height: auto;
-
             max-height: 55vh;
-
             object-fit: contain;
-
             display: block;
         `;
 
         imageContainer.appendChild(image);
+        document.body.appendChild(imageContainer);
 
-        document.body.appendChild(
-            imageContainer
-        );
-
-        /* =====================================
-         * MAIN UI ROOT
-         * ===================================== */
-
-        const root =
-            document.createElement('div');
-
-        root.id =
-            'model-ui-root';
-
+        const root = document.createElement('div');
+        root.id = 'model-ui-root';
         root.style.cssText = `
             position: fixed;
-
             left: 0;
             right: 0;
             bottom: 0;
-
             z-index: 9999;
-
             pointer-events: none;
-
             display: flex;
             flex-direction: column;
-
             align-items: center;
-
-            padding:
-                0 12px
-                max(16px, env(safe-area-inset-right))
-                max(20px, env(safe-area-inset-bottom))
-                max(16px, env(safe-area-inset-left));
-
-            font-family:
-                system-ui,
-                -apple-system,
-                BlinkMacSystemFont,
-                "Segoe UI",
-                Roboto,
-                sans-serif;
-
+            padding: 0 12px max(16px, env(safe-area-inset-bottom));
+            font-family: system-ui, -apple-system, BlinkMacSystemFont,
+                "Segoe UI", Roboto, sans-serif;
             box-sizing: border-box;
         `;
 
-        /* =====================================
-         * FILTER PANEL
-         * ===================================== */
+        /* Product type and category filters */
 
-        const filterPanel =
-            document.createElement('div');
-
-        filterPanel.id =
-            'menu-filter-panel';
-
+        const filterPanel = document.createElement('div');
+        filterPanel.id = 'menu-filter-panel';
         filterPanel.style.cssText = `
             pointer-events: auto;
-
             width: 100%;
             max-width: 520px;
-
             margin-bottom: 8px;
-
             display: flex;
-
             gap: 8px;
-
             overflow-x: auto;
-
             scrollbar-width: none;
-
             padding: 2px;
+            box-sizing: border-box;
         `;
 
-        /* TYPE BUTTONS */
-
-        const typeButtons =
-            document.createElement('div');
-
+        const typeButtons = document.createElement('div');
         typeButtons.style.cssText = `
             display: flex;
             gap: 6px;
             flex-shrink: 0;
         `;
 
-        const createFilterButton =
-            (label, value) => {
+        const createFilterButton = (label, value) => {
+            const button = document.createElement('button');
+            button.textContent = label;
+            button.dataset.type = value;
+            button.style.cssText = `
+                border: none;
+                padding: 9px 13px;
+                border-radius: 999px;
+                background: rgba(0,0,0,0.72);
+                color: white;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                white-space: nowrap;
+                touch-action: manipulation;
+            `;
+            button.onclick = () => this.setType(value);
+            return button;
+        };
 
-                const button =
-                    document.createElement(
-                        'button'
-                    );
+        // Meals is the default. There is no "All products" type.
+        typeButtons.appendChild(createFilterButton('Meals', 'meal'));
+        typeButtons.appendChild(createFilterButton('Drinks', 'drink'));
+        filterPanel.appendChild(typeButtons);
 
-                button.textContent =
-                    label;
-
-                button.dataset.type =
-                    value;
-
-                button.style.cssText = `
-                    border: none;
-
-                    padding:
-                        9px 13px;
-
-                    border-radius:
-                        999px;
-
-                    background:
-                        rgba(0,0,0,0.72);
-
-                    color: white;
-
-                    font-size: 13px;
-
-                    font-weight: 600;
-
-                    cursor: pointer;
-
-                    backdrop-filter:
-                        blur(8px);
-
-                    -webkit-backdrop-filter:
-                        blur(8px);
-
-                    white-space: nowrap;
-
-                    touch-action: manipulation;
-                `;
-
-                button.onclick = () => {
-                    this.setType(value);
-                };
-
-                return button;
-            };
-
-        typeButtons.appendChild(
-            createFilterButton(
-                'All',
-                'all'
-            )
-        );
-
-        typeButtons.appendChild(
-            createFilterButton(
-                'Meals',
-                'meal'
-            )
-        );
-
-        typeButtons.appendChild(
-            createFilterButton(
-                'Drinks',
-                'drink'
-            )
-        );
-
-        filterPanel.appendChild(
-            typeButtons
-        );
-
-        /* CATEGORY SELECT */
-
-        const categorySelect =
-            document.createElement(
-                'select'
-            );
-
-        categorySelect.id =
-            'category-select';
-
+        const categorySelect = document.createElement('select');
+        categorySelect.id = 'category-select';
         categorySelect.style.cssText = `
             border: none;
-
-            padding:
-                9px 12px;
-
-            border-radius:
-                999px;
-
-            background:
-                rgba(0,0,0,0.72);
-
+            padding: 9px 12px;
+            border-radius: 999px;
+            background: rgba(0,0,0,0.72);
             color: white;
-
             font-size: 13px;
-
             font-weight: 600;
-
             outline: none;
-
             max-width: 180px;
-
-            backdrop-filter:
-                blur(8px);
-
-            -webkit-backdrop-filter:
-                blur(8px);
         `;
 
         categorySelect.onchange = () => {
-            this.setCategory(
-                categorySelect.value
-            );
+            this.setCategory(categorySelect.value);
         };
 
-        filterPanel.appendChild(
-            categorySelect
-        );
+        filterPanel.appendChild(categorySelect);
+        root.appendChild(filterPanel);
 
-        root.appendChild(
-            filterPanel
-        );
+        /* Product information panel */
 
-        /* =====================================
-         * PRODUCT INFORMATION
-         * ===================================== */
-
-        const panel =
-            document.createElement('div');
-
-        panel.id =
-            'product-panel';
-
+        const panel = document.createElement('div');
+        panel.id = 'product-panel';
         panel.style.cssText = `
             pointer-events: none;
-
             width: 100%;
-
             max-width: 420px;
-
-            background:
-                rgba(0,0,0,0.72);
-
-            backdrop-filter:
-                blur(10px);
-
-            -webkit-backdrop-filter:
-                blur(10px);
-
-            border-radius:
-                16px;
-
-            padding:
-                14px 18px;
-
-            margin-bottom:
-                10px;
-
+            background: rgba(0,0,0,0.72);
+            border-radius: 16px;
+            padding: 14px 18px;
+            margin-bottom: 10px;
             color: white;
-
-            box-shadow:
-                0 8px 24px
-                rgba(0,0,0,0.35);
-
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
             box-sizing: border-box;
         `;
 
-        const title =
-            document.createElement('div');
-
-        title.id =
-            'product-title';
-
+        const title = document.createElement('div');
+        title.id = 'product-title';
         title.style.cssText = `
             font-size: 20px;
-
             font-weight: 700;
-
             margin-bottom: 5px;
-
             line-height: 1.25;
         `;
 
-        const description =
-            document.createElement('div');
-
-        description.id =
-            'product-description';
-
+        const description = document.createElement('div');
+        description.id = 'product-description';
         description.style.cssText = `
             font-size: 13px;
-
             opacity: 0.9;
-
             line-height: 1.4;
-
             margin-bottom: 8px;
         `;
 
-        const price =
-            document.createElement('div');
-
-        price.id =
-            'product-price';
-
+        const price = document.createElement('div');
+        price.id = 'product-price';
         price.style.cssText = `
             font-size: 21px;
-
             font-weight: 700;
-
             color: #4ade80;
         `;
 
-        const counter =
-            document.createElement('div');
-
-        counter.id =
-            'product-counter';
-
+        const counter = document.createElement('div');
+        counter.id = 'product-counter';
         counter.style.cssText = `
             font-size: 11px;
-
             opacity: 0.65;
-
             margin-top: 5px;
         `;
 
-        panel.appendChild(title);
-        panel.appendChild(description);
-        panel.appendChild(price);
-        panel.appendChild(counter);
-
+        panel.append(title, description, price, counter);
         root.appendChild(panel);
 
-        /* =====================================
-         * STATUS
-         * ===================================== */
-
-        const status =
-            document.createElement('div');
-
-        status.id =
-            'menu-status';
-
+        const status = document.createElement('div');
+        status.id = 'menu-status';
         status.style.cssText = `
             color: white;
-
             font-size: 12px;
-
             margin-bottom: 6px;
-
-            text-shadow:
-                0 2px 5px black;
-
+            text-shadow: 0 2px 5px black;
             min-height: 16px;
+            text-align: center;
         `;
-
         root.appendChild(status);
 
-        /* =====================================
-         * BUTTON ROW
-         * ===================================== */
+        /* Navigation and rotation controls */
 
-        const buttons =
-            document.createElement('div');
-
+        const buttons = document.createElement('div');
         buttons.style.cssText = `
             display: flex;
-
             gap: 8px;
-
             pointer-events: auto;
-
             flex-wrap: wrap;
-
             justify-content: center;
-
             max-width: 520px;
         `;
 
         const buttonStyle = `
             pointer-events: auto;
-
-            padding:
-                11px 14px;
-
+            padding: 11px 14px;
             font-size: 13px;
-
             font-weight: 600;
-
             border-radius: 12px;
-
             border: none;
-
-            background:
-                rgba(0,0,0,0.75);
-
+            background: rgba(0,0,0,0.75);
             color: white;
-
-            backdrop-filter:
-                blur(6px);
-
-            -webkit-backdrop-filter:
-                blur(6px);
-
             cursor: pointer;
-
-            box-shadow:
-                0 4px 14px
-                rgba(0,0,0,0.35);
-
-            user-select: none;
-
-            -webkit-user-select: none;
-
+            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
             touch-action: manipulation;
-
             min-height: 42px;
         `;
 
-        /* PREVIOUS */
+        const prev = document.createElement('button');
+        prev.textContent = '◀ Prev';
+        prev.style.cssText = buttonStyle;
+        prev.onclick = () => this.prev();
 
-        const prev =
-            document.createElement('button');
+        const rotate = document.createElement('button');
+        rotate.textContent = '🔄 Hold to Rotate';
+        rotate.style.cssText = buttonStyle;
 
-        prev.textContent =
-            '◀ Prev';
+        rotate.addEventListener('pointerdown', event => {
+            event.preventDefault();
+            this.startRotation();
+            try {
+                rotate.setPointerCapture(event.pointerId);
+            } catch (_) {}
+        });
 
-        prev.style.cssText =
-            buttonStyle;
+        const stopRotate = () => this.stopRotation();
 
-        prev.onclick = () => {
-            this.prev();
-        };
+        rotate.addEventListener('pointerup', stopRotate);
+        rotate.addEventListener('pointercancel', stopRotate);
+        rotate.addEventListener('lostpointercapture', stopRotate);
+        rotate.addEventListener('contextmenu', event => event.preventDefault());
 
-        /* ROTATE */
+        const next = document.createElement('button');
+        next.textContent = 'Next ▶';
+        next.style.cssText = buttonStyle;
+        next.onclick = () => this.next();
 
-        const rotate =
-            document.createElement('button');
-
-        rotate.textContent =
-            '🔄 Hold to Rotate';
-
-        rotate.style.cssText =
-            buttonStyle;
-
-        rotate.addEventListener(
-            'mousedown',
-            event => {
-                event.preventDefault();
-
-                this.startRotation();
-            }
-        );
-
-        rotate.addEventListener(
-            'mouseup',
-            () => {
-                this.stopRotation();
-            }
-        );
-
-        rotate.addEventListener(
-            'mouseleave',
-            () => {
-                this.stopRotation();
-            }
-        );
-
-        rotate.addEventListener(
-            'touchstart',
-            event => {
-                event.preventDefault();
-
-                this.startRotation();
-            },
-            {
-                passive: false
-            }
-        );
-
-        rotate.addEventListener(
-            'touchend',
-            () => {
-                this.stopRotation();
-            }
-        );
-
-        rotate.addEventListener(
-            'touchcancel',
-            () => {
-                this.stopRotation();
-            }
-        );
-
-        /* NEXT */
-
-        const next =
-            document.createElement('button');
-
-        next.textContent =
-            'Next ▶';
-
-        next.style.cssText =
-            buttonStyle;
-
-        next.onclick = () => {
-            this.next();
-        };
-
-        buttons.appendChild(prev);
-        buttons.appendChild(rotate);
-        buttons.appendChild(next);
-
+        buttons.append(prev, rotate, next);
         root.appendChild(buttons);
 
-        /* =====================================
-         * ZOOM ROW
-         * ===================================== */
+        /* Zoom controls */
 
-        const zoomRow =
-            document.createElement('div');
-
+        const zoomRow = document.createElement('div');
         zoomRow.style.cssText = `
             display: flex;
-
             gap: 7px;
-
             pointer-events: auto;
-
             margin-top: 8px;
-
             justify-content: center;
         `;
 
-        const createZoomButton =
-            (id, label, factor) => {
+        const createZoomButton = (id, label, factor) => {
+            const button = document.createElement('button');
+            button.id = id;
+            button.className = 'zoom-btn';
+            button.textContent = label;
+            button.style.cssText = buttonStyle;
+            button.onclick = () => this.setZoom(factor);
+            return button;
+        };
 
-                const button =
-                    document.createElement(
-                        'button'
-                    );
-
-                button.id = id;
-
-                button.className =
-                    'zoom-btn';
-
-                button.textContent =
-                    label;
-
-                button.style.cssText =
-                    buttonStyle;
-
-                button.onclick = () => {
-                    this.setZoom(factor);
-                };
-
-                return button;
-            };
-
-        zoomRow.appendChild(
-            createZoomButton(
-                'zoom-x05',
-                '×0.5',
-                0.5
-            )
+        zoomRow.append(
+            createZoomButton('zoom-x05', '×0.5', 0.5),
+            createZoomButton('zoom-x1', '×1', 1.0),
+            createZoomButton('zoom-x2', '×2', 2.0)
         );
 
-        zoomRow.appendChild(
-            createZoomButton(
-                'zoom-x1',
-                '×1',
-                1.0
-            )
-        );
-
-        zoomRow.appendChild(
-            createZoomButton(
-                'zoom-x2',
-                '×2',
-                2.0
-            )
-        );
-
-        root.appendChild(
-            zoomRow
-        );
-
+        root.appendChild(zoomRow);
         document.body.appendChild(root);
 
-        /*
-         * Populate category selector.
-         */
         this.updateFilterUI();
     }
 
@@ -1505,178 +1045,89 @@ export class ARMenuManager extends Component {
      * ========================================= */
 
     updateFilterUI() {
-        const select =
-            document.getElementById(
-                'category-select'
-            );
+        const select = document.getElementById('category-select');
 
-        if (!select) {
-            return;
-        }
+        if (select) {
+            select.innerHTML = '';
 
-        select.innerHTML = '';
+            for (const category of this.categories) {
+                const option = document.createElement('option');
+                option.value = category;
 
-        for (
-            const category of this.categories
-        ) {
-            const option =
-                document.createElement(
-                    'option'
-                );
-
-            option.value =
-                category;
-
-            option.textContent =
-                category === 'all'
-                    ? 'All Categories'
+                option.textContent = category === 'all'
+                    ? (
+                        this.currentType === 'meal'
+                            ? 'All Meal Categories'
+                            : 'All Drink Categories'
+                    )
                     : category;
 
-            option.selected =
-                category ===
-                this.currentCategory;
-
-            select.appendChild(
-                option
-            );
+                option.selected = category === this.currentCategory;
+                select.appendChild(option);
+            }
         }
 
-        /*
-         * Update type button appearance.
-         */
-        document
-            .querySelectorAll(
-                '[data-type]'
-            )
-            .forEach(button => {
+        document.querySelectorAll('[data-type]').forEach(button => {
+            const active = button.dataset.type === this.currentType;
 
-                const active =
-                    button.dataset.type ===
-                    this.currentType;
+            button.style.background = active
+                ? 'rgba(74,222,128,0.85)'
+                : 'rgba(0,0,0,0.72)';
 
-                if (active) {
-                    button.style.background =
-                        'rgba(74,222,128,0.85)';
-                    button.style.color =
-                        '#06140b';
-                } else {
-                    button.style.background =
-                        'rgba(0,0,0,0.72)';
-                    button.style.color =
-                        'white';
-                }
-            });
+            button.style.color = active ? '#06140b' : 'white';
+        });
     }
 
     /* =========================================
-     * UPDATE PRODUCT UI
+     * UPDATE PRODUCT DETAILS
      * ========================================= */
 
     updateUI() {
-        const title =
-            document.getElementById(
-                'product-title'
-            );
+        const title = document.getElementById('product-title');
+        const description = document.getElementById('product-description');
+        const price = document.getElementById('product-price');
+        const counter = document.getElementById('product-counter');
 
-        const description =
-            document.getElementById(
-                'product-description'
-            );
-
-        const price =
-            document.getElementById(
-                'product-price'
-            );
-
-        const counter =
-            document.getElementById(
-                'product-counter'
-            );
-
-        if (
-            !title ||
-            !description ||
-            !price ||
-            !counter
-        ) {
-            return;
-        }
+        if (!title || !description || !price || !counter) return;
 
         if (!this.currentProduct) {
-            title.textContent =
-                '';
-
-            description.textContent =
-                '';
-
-            price.textContent =
-                '';
-
-            counter.textContent =
-                '';
-
+            title.textContent = '';
+            description.textContent = '';
+            price.textContent = '';
+            counter.textContent = '';
             return;
         }
 
-        title.textContent =
-            this.currentProduct.name;
-
-        description.textContent =
-            this.currentProduct.desc;
-
-        price.textContent =
-            this.formatPrice(
-                this.currentProduct.price
-            );
+        title.textContent = this.currentProduct.name;
+        description.textContent = this.currentProduct.desc;
+        price.textContent = this.formatPrice(this.currentProduct.price);
 
         counter.textContent =
-            `${this.currentIndex + 1} / ` +
-            `${this.filteredProducts.length}`;
+            `${this.currentIndex + 1} / ${this.filteredProducts.length}`;
 
-        /*
-         * Notify any external UI if needed.
-         */
         window.dispatchEvent(
-            new CustomEvent(
-                'armenu-update',
-                {
-                    detail: {
-                        product:
-                            this.currentProduct,
-
-                        index:
-                            this.currentIndex,
-
-                        total:
-                            this.filteredProducts.length,
-
-                        categories:
-                            this.categories,
-
-                        type:
-                            this.currentType,
-
-                        category:
-                            this.currentCategory
-                    }
-                }
-            )
+            new CustomEvent('armenu-update', {
+                detail: {
+                    product: this.currentProduct,
+                    index: this.currentIndex,
+                    total: this.filteredProducts.length,
+                    categories: this.categories,
+                    type: this.currentType,
+                    category: this.currentCategory,
+                },
+            })
         );
     }
 
     /* =========================================
-     * STATUS
+     * STATUS MESSAGE
      * ========================================= */
 
     setStatus(message) {
-        const status =
-            document.getElementById(
-                'menu-status'
-            );
+        const status = document.getElementById('menu-status');
 
         if (status) {
-            status.textContent =
-                message || '';
+            status.textContent = message || '';
         }
     }
 }

@@ -74267,94 +74267,75 @@ return a / b;`;
       this.products = [];
       this.filteredProducts = [];
       this.categories = [];
-      this.currentType = "all";
+      this.currentType = "meal";
       this.currentCategory = "all";
       this.currentIndex = 0;
       this.currentProduct = null;
       this.modelPool = /* @__PURE__ */ new Map();
+      this.modelPrefabs = /* @__PURE__ */ new Map();
+      this.modelLoads = /* @__PURE__ */ new Map();
       this.activeModelRoot = null;
-      this.loading = /* @__PURE__ */ new Set();
       this.modelRequestId = 0;
+      this.preloadQueue = [];
+      this.preloadQueuedIds = /* @__PURE__ */ new Set();
+      this.preloadWorkerRunning = false;
+      this.maxCachedInstances = 8;
       this.isRotating = false;
       this.currentScaleFactor = 1;
       this.zoomSettings = {
-        0.5: {
-          scale: 0.5,
-          fov: 85
-        },
-        1: {
-          scale: 1,
-          fov: 60
-        },
-        2: {
-          scale: 2,
-          fov: 75
-        }
+        0.5: { scale: 0.5, fov: 85 },
+        1: { scale: 1, fov: 60 },
+        2: { scale: 2, fov: 75 }
       };
     }
     async start() {
       this.createUI();
       window.arMenu = this;
-      const params = new URLSearchParams(
-        window.location.search
-      );
+      const params = new URLSearchParams(window.location.search);
       this.restaurantId = params.get("restaurant");
       this.tableId = params.get("table");
       if (!this.restaurantId) {
         console.error(
           "ARMenuManager: No restaurant ID found in URL."
         );
-        this.setStatus(
-          "No restaurant ID was provided."
-        );
+        this.setStatus("No restaurant ID was provided.");
         return;
       }
-      console.log(
-        "Restaurant:",
-        this.restaurantId
-      );
-      console.log(
-        "Table:",
-        this.tableId
-      );
+      console.log("Restaurant:", this.restaurantId);
+      console.log("Table:", this.tableId);
+      console.log("Configured R2 base:", this.r2Base);
       this.setZoom(1);
       await this.fetchMenu(this.restaurantId);
       this.buildCategories();
       this.applyFilters();
       if (this.filteredProducts.length > 0) {
         this.showProduct(0);
+        this.startRestaurantPreload();
       } else {
         this.setStatus(
-          "No menu items were found."
+          this.currentType === "meal" ? "No meals found. Select Drinks to view drinks." : "No drinks found. Select Meals to view meals."
         );
       }
     }
     /* =========================================
-     * FETCH MENU
+     * FETCH RESTAURANT MENU
      * ========================================= */
     async fetchMenu(restaurantId) {
       try {
         this.setStatus("Loading menu...");
-        const url = `${this.apiBase}/restaurants/menu?restaurant=${encodeURIComponent(restaurantId)}`;
-        console.log(
-          "Fetching menu:",
-          url
-        );
+        const base = String(this.apiBase || "").replace(/\/+$/, "");
+        const url = `${base}/restaurants/menu?restaurant=${encodeURIComponent(restaurantId)}`;
         const response = await fetch(url);
         if (!response.ok) {
-          throw new Error(
-            `HTTP ${response.status}`
-          );
+          throw new Error(`Menu API returned HTTP ${response.status}`);
         }
         const data = await response.json();
         if (!data.success) {
-          throw new Error(
-            "Backend returned success=false"
-          );
+          throw new Error("Backend returned success=false");
         }
         const meals = (data.meal || []).map((meal) => ({
           type: "meal",
-          id: meal._id,
+          id: String(meal._id || ""),
           name: meal.mealName || "Unnamed Meal",
           desc: meal.desc || "",
           price: meal.price,
@@ -74364,7 +74345,7 @@ return a / b;`;
         }));
         const drinks = (data.drink || []).map((drink) => ({
           type: "drink",
-          id: drink._id,
+          id: String(drink._id || ""),
           name: drink.drinkName || "Unnamed Drink",
           desc: drink.desc || "",
           price: drink.price,
@@ -74372,46 +74353,45 @@ return a / b;`;
           img: drink.drinkImg || "",
           raw: drink
         }));
-        this.products = [
-          ...meals,
-          ...drinks
-        ];
+        this.products = [...meals, ...drinks].filter((p2) => p2.id);
         console.log(
-          `Loaded ${this.products.length} products`
+          `Loaded ${this.products.length} products for restaurant ${restaurantId}`,
+          {
+            meals: meals.length,
+            drinks: drinks.length
+          }
         );
         this.setStatus("");
       } catch (error) {
-        console.error(
-          "ARMenuManager: Failed to fetch menu:",
-          error
-        );
+        console.error("ARMenuManager: Failed to fetch menu:", error);
         this.products = [];
-        this.setStatus(
-          "Unable to load menu."
-        );
+        this.setStatus("Unable to load menu. Check the API connection.");
       }
     }
     /* =========================================
-     * CATEGORY GENERATION
+     * CATEGORY FILTERING
      * ========================================= */
     buildCategories() {
       const categorySet = /* @__PURE__ */ new Set();
       for (const product of this.products) {
-        if (product.category) {
+        if (product.type === this.currentType && product.category) {
           categorySet.add(product.category);
         }
       }
       this.categories = [
         "all",
-        ...Array.from(categorySet).sort()
+        ...Array.from(categorySet).sort(
+          (a, b) => String(a).localeCompare(String(b))
+        )
       ];
+      if (this.currentCategory !== "all" && !categorySet.has(this.currentCategory)) {
+        this.currentCategory = "all";
+      }
+      this.updateFilterUI();
     }
-    /* =========================================
-     * FILTERING
-     * ========================================= */
     applyFilters() {
       this.filteredProducts = this.products.filter((product) => {
-        const typeMatches = this.currentType === "all" || product.type === this.currentType;
+        const typeMatches = product.type === this.currentType;
         const categoryMatches = this.currentCategory === "all" || product.category === this.currentCategory;
         return typeMatches && categoryMatches;
       });
@@ -74420,15 +74400,26 @@ return a / b;`;
       this.updateUI();
     }
     setType(type) {
+      if (type !== "meal" && type !== "drink") {
+        console.warn(
+          'ARMenuManager: Type must be "meal" or "drink".'
+        );
+        return;
+      }
       this.currentType = type;
       this.currentCategory = "all";
+      this.buildCategories();
       this.applyFilters();
       if (this.filteredProducts.length > 0) {
         this.showProduct(0);
       } else {
         this.hideActiveModel();
+        this.hideImageFallback();
         this.currentProduct = null;
         this.updateUI();
+        this.setStatus(
+          type === "meal" ? "No meals found. Select Drinks to view drinks." : "No drinks found. Select Meals to view meals."
+        );
       }
     }
     setCategory(category) {
@@ -74438,44 +74429,104 @@ return a / b;`;
         this.showProduct(0);
       } else {
         this.hideActiveModel();
+        this.hideImageFallback();
         this.currentProduct = null;
         this.updateUI();
+        this.setStatus("No products found in this category.");
       }
     }
     /* =========================================
-     * NEXT / PREVIOUS
+     * PRODUCT NAVIGATION
      * ========================================= */
     next() {
-      if (this.filteredProducts.length === 0) {
+      if (!this.filteredProducts.length)
         return;
-      }
       this.currentIndex = (this.currentIndex + 1) % this.filteredProducts.length;
-      this.showProduct(
-        this.currentIndex
-      );
+      this.showProduct(this.currentIndex);
     }
     prev() {
-      if (this.filteredProducts.length === 0) {
+      if (!this.filteredProducts.length)
         return;
-      }
       this.currentIndex = (this.currentIndex - 1 + this.filteredProducts.length) % this.filteredProducts.length;
-      this.showProduct(
-        this.currentIndex
-      );
+      this.showProduct(this.currentIndex);
     }
     /* =========================================
-     * SHOW PRODUCT
+     * PRODUCT ID AND CORRECTED R2 URL
+     * ========================================= */
+    getModelId(product) {
+      return product && product.id ? String(product.id) : "";
+    }
+    getModelUrl(product) {
+      const modelId = this.getModelId(product);
+      if (!modelId) {
+        throw new Error("Missing MongoDB product ID.");
+      }
+      let base = String(this.r2Base || "").trim();
+      if (!base) {
+        throw new Error("R2 base URL is empty.");
+      }
+      base = base.replace(/\/+$/, "");
+      if (!/\/models$/i.test(base)) {
+        base += "/models";
+      }
+      const url = `${base}/${encodeURIComponent(modelId)}.glb`;
+      console.log("Constructed GLB URL:", url);
+      return url;
+    }
+    /* =========================================
+     * LOAD AND CACHE GLB PREFABS
+     * ========================================= */
+    ensurePrefab(product) {
+      const modelId = this.getModelId(product);
+      if (!modelId) {
+        return Promise.reject(
+          new Error("Missing MongoDB product ID.")
+        );
+      }
+      if (this.modelPrefabs.has(modelId)) {
+        return Promise.resolve(this.modelPrefabs.get(modelId));
+      }
+      if (this.modelLoads.has(modelId)) {
+        return this.modelLoads.get(modelId);
+      }
+      let url;
+      try {
+        url = this.getModelUrl(product);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      console.log(
+        `Loading GLB for product ID: ${modelId}`,
+        url
+      );
+      const loadPromise = this.engine.loadGLTF({ file: url }).then((prefab) => {
+        this.modelPrefabs.set(modelId, prefab);
+        this.dispatchModelReady(product, true);
+        return prefab;
+      }).catch((error) => {
+        console.error(
+          `ARMenuManager: GLB load failed for "${modelId}".`,
+          {
+            url,
+            error
+          }
+        );
+        throw error;
+      }).finally(() => {
+        this.modelLoads.delete(modelId);
+      });
+      this.modelLoads.set(modelId, loadPromise);
+      return loadPromise;
+    }
+    /* =========================================
+     * SHOW SELECTED PRODUCT
      * ========================================= */
     async showProduct(index) {
-      if (this.filteredProducts.length === 0) {
+      if (!this.filteredProducts.length)
         return;
-      }
       index = Math.max(
         0,
-        Math.min(
-          index,
-          this.filteredProducts.length - 1
-        )
+        Math.min(index, this.filteredProducts.length - 1)
       );
       this.currentIndex = index;
       this.currentProduct = this.filteredProducts[index];
@@ -74484,114 +74535,180 @@ return a / b;`;
       this.hideImageFallback();
       const requestId = ++this.modelRequestId;
       const product = this.currentProduct;
-      const nameKey = this.sanitizeName(product.name);
-      const cached = this.modelPool.get(nameKey);
+      const modelId = this.getModelId(product);
+      if (product.img) {
+        this.showImageFallback(product.img);
+      }
+      if (!modelId) {
+        this.setStatus("No model ID is available for this product.");
+        this.dispatchModelReady(product, false);
+        return;
+      }
+      const cached = this.modelPool.get(modelId);
       if (cached) {
-        if (requestId !== this.modelRequestId) {
+        if (requestId !== this.modelRequestId)
           return;
-        }
+        cached.lastUsed = Date.now();
         cached.root.active = true;
         this.activeModelRoot = cached.root;
-        this.placeModel(
-          cached.root
-        );
+        this.placeModel(cached.root);
         this.applyScaleToCurrent();
+        this.hideImageFallback();
         this.setStatus("");
         return;
       }
-      this.setStatus(
-        "Loading 3D model..."
-      );
-      if (this.loading.has(nameKey)) {
-        return;
-      }
-      this.loading.add(nameKey);
+      this.setStatus("Loading 3D model...");
       try {
-        const url = `${this.r2Base}${nameKey}.glb`;
-        console.log(
-          "Loading GLB:",
-          url
-        );
-        const prefab = await this.engine.loadGLTF({
-          file: url
-        });
-        if (requestId !== this.modelRequestId) {
+        const prefab = await this.ensurePrefab(product);
+        if (requestId !== this.modelRequestId)
           return;
-        }
-        const result = this.engine.scene.instantiate(
-          prefab
-        );
+        const result = this.engine.scene.instantiate(prefab);
         const root = result.root;
+        if (!root) {
+          throw new Error("GLB prefab did not create a root object.");
+        }
         root.parent = this.displayRoot;
-        root.setTranslationLocal([
-          0,
-          0.1,
-          0
-        ]);
-        root.setScalingLocal([
-          this.modelScale,
-          this.modelScale,
-          this.modelScale
-        ]);
+        root.setTranslationLocal([0, 0.1, 0]);
+        const scale7 = this.modelScale * this.currentScaleFactor;
+        root.setScalingLocal([scale7, scale7, scale7]);
         root.active = true;
-        this.modelPool.set(
-          nameKey,
-          {
-            root,
-            prefab
-          }
-        );
+        this.modelPool.set(modelId, {
+          root,
+          prefab,
+          lastUsed: Date.now()
+        });
         this.activeModelRoot = root;
-        this.applyScaleToCurrent();
+        this.hideImageFallback();
         this.setStatus("");
+        this.evictOldModelInstances(modelId);
+        this.dispatchModelReady(product, true);
       } catch (error) {
-        console.warn(
-          `No GLB available for "${nameKey}".`,
+        console.error(
+          `ARMenuManager: Could not display GLB "${modelId}".`,
           error
         );
         if (requestId === this.modelRequestId) {
-          this.showImageFallback(
-            product.img
+          this.showImageFallback(product.img);
+          this.setStatus(
+            product.img ? "3D model unavailable. Showing product image." : "3D model unavailable. Check the GLB URL and R2 access."
           );
-          this.setStatus("");
+          this.dispatchModelReady(product, false);
         }
-      } finally {
-        this.loading.delete(nameKey);
       }
     }
     /* =========================================
-     * MODEL VISIBILITY
+     * RESTAURANT-SPECIFIC BACKGROUND PRELOAD
      * ========================================= */
-    hideActiveModel() {
-      if (!this.activeModelRoot) {
-        return;
+    startRestaurantPreload() {
+      for (const product of this.products) {
+        const id = this.getModelId(product);
+        if (!id || this.modelPrefabs.has(id) || this.modelLoads.has(id) || this.preloadQueuedIds.has(id)) {
+          continue;
+        }
+        this.preloadQueue.push(product);
+        this.preloadQueuedIds.add(id);
       }
+      console.log(
+        `ARMenuManager: Queued ${this.preloadQueue.length} models for background preload.`
+      );
+      this.pumpPreloadQueue();
+    }
+    pumpPreloadQueue() {
+      if (this.preloadWorkerRunning)
+        return;
+      this.preloadWorkerRunning = true;
+      const runNext = async () => {
+        try {
+          while (this.preloadQueue.length > 0) {
+            const product = this.preloadQueue.shift();
+            const id = this.getModelId(product);
+            this.preloadQueuedIds.delete(id);
+            if (!id || this.modelPrefabs.has(id)) {
+              continue;
+            }
+            try {
+              await this.ensurePrefab(product);
+              console.log(
+                `ARMenuManager: Preloaded model "${id}".`
+              );
+            } catch (error) {
+              let url = "URL unavailable";
+              try {
+                url = this.getModelUrl(product);
+              } catch (_) {
+              }
+              console.error(
+                `ARMenuManager: Background preload failed for "${id}".`,
+                { url, error }
+              );
+            }
+          }
+        } finally {
+          this.preloadWorkerRunning = false;
+        }
+      };
+      runNext();
+    }
+    dispatchModelReady(product, available) {
+      window.dispatchEvent(
+        new CustomEvent("armenu-model-ready", {
+          detail: {
+            productId: this.getModelId(product),
+            product,
+            available
+          }
+        })
+      );
+    }
+    /* =========================================
+     * INSTANCE CACHE MANAGEMENT
+     * ========================================= */
+    evictOldModelInstances(keepModelId) {
+      if (this.modelPool.size <= this.maxCachedInstances)
+        return;
+      const candidates = Array.from(this.modelPool.entries()).filter(
+        ([id, entry]) => id !== keepModelId && entry.root !== this.activeModelRoot
+      ).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+      while (this.modelPool.size > this.maxCachedInstances && candidates.length > 0) {
+        const [id, entry] = candidates.shift();
+        try {
+          entry.root.active = false;
+          if (typeof entry.root.destroy === "function") {
+            entry.root.destroy();
+          }
+          this.modelPool.delete(id);
+        } catch (error) {
+          console.warn(
+            `ARMenuManager: Could not evict model "${id}".`,
+            error
+          );
+          break;
+        }
+      }
+    }
+    hideActiveModel() {
+      if (!this.activeModelRoot)
+        return;
       this.activeModelRoot.active = false;
+      for (const entry of this.modelPool.values()) {
+        if (entry.root === this.activeModelRoot) {
+          entry.lastUsed = Date.now();
+          break;
+        }
+      }
       this.activeModelRoot = null;
     }
-    /* =========================================
-     * MODEL PLACEMENT
-     * ========================================= */
     placeModel(root) {
-      if (!root) {
+      if (!root)
         return;
-      }
-      root.setTranslationLocal([
-        0,
-        0.1,
-        0
-      ]);
+      root.setTranslationLocal([0, 0.1, 0]);
     }
     /* =========================================
      * ROTATION
      * ========================================= */
     update(dt) {
-      if (!this.isRotating) {
+      if (!this.isRotating || !this.activeModelRoot)
         return;
-      }
-      if (!this.activeModelRoot) {
-        return;
-      }
       const angle2 = this.rotateSpeed * dt * (Math.PI / 180);
       this.activeModelRoot.rotateAxisAngleRadObject(
         [0, 1, 0],
@@ -74609,9 +74726,8 @@ return a / b;`;
      * ========================================= */
     setZoom(factor) {
       const setting = this.zoomSettings[factor];
-      if (!setting) {
+      if (!setting)
         return;
-      }
       this.currentScaleFactor = setting.scale;
       this.applyScaleToCurrent();
       const view = this.engine.scene.mainView;
@@ -74619,23 +74735,14 @@ return a / b;`;
         view.fov = setting.fov;
       }
       document.querySelectorAll(".zoom-btn").forEach((button) => {
-        button.classList.remove(
-          "active"
-        );
+        button.classList.remove("active");
       });
-      let activeId = "zoom-x1";
-      if (factor === 0.5) {
-        activeId = "zoom-x05";
-      }
-      if (factor === 2) {
-        activeId = "zoom-x2";
-      }
+      const activeId = factor === 0.5 ? "zoom-x05" : factor === 2 ? "zoom-x2" : "zoom-x1";
       document.getElementById(activeId)?.classList.add("active");
     }
     applyScaleToCurrent() {
-      if (!this.activeModelRoot) {
+      if (!this.activeModelRoot)
         return;
-      }
       const scale7 = this.modelScale * this.currentScaleFactor;
       this.activeModelRoot.setScalingLocal([
         scale7,
@@ -74644,22 +74751,23 @@ return a / b;`;
       ]);
     }
     /* =========================================
-     * IMAGE FALLBACK
+     * 2D IMAGE FALLBACK
      * ========================================= */
     showImageFallback(imgUrl) {
       const container = document.getElementById(
         "product-image-container"
       );
-      const img = document.getElementById(
-        "product-image"
-      );
-      if (!container || !img) {
+      const img = document.getElementById("product-image");
+      if (!container || !img)
         return;
-      }
       if (!imgUrl) {
         container.style.display = "none";
         return;
       }
+      img.onerror = () => {
+        container.style.display = "none";
+        console.warn("ARMenuManager: Product image failed to load:", imgUrl);
+      };
       img.src = imgUrl;
       container.style.display = "block";
     }
@@ -74672,12 +74780,6 @@ return a / b;`;
       }
     }
     /* =========================================
-     * NAME SANITIZATION
-     * ========================================= */
-    sanitizeName(name) {
-      return String(name || "").toLowerCase().trim().replace(/&/g, "and").replace(/\+/g, "plus").replace(/['’]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-");
-    }
-    /* =========================================
      * PRICE FORMATTING
      * ========================================= */
     formatPrice(price) {
@@ -74688,25 +74790,18 @@ return a / b;`;
       if (Number.isNaN(number)) {
         return String(price);
       }
-      return new Intl.NumberFormat(
-        "en-NG",
-        {
-          style: "currency",
-          currency: "NGN",
-          maximumFractionDigits: 0
-        }
-      ).format(number);
+      return new Intl.NumberFormat("en-NG", {
+        style: "currency",
+        currency: "NGN",
+        maximumFractionDigits: 0
+      }).format(number);
     }
     /* =========================================
-     * UI
+     * UI CREATION
      * ========================================= */
     createUI() {
-      document.getElementById(
-        "model-ui-root"
-      )?.remove();
-      document.getElementById(
-        "product-image-container"
-      )?.remove();
+      document.getElementById("model-ui-root")?.remove();
+      document.getElementById("product-image-container")?.remove();
       const imageContainer = document.createElement("div");
       imageContainer.id = "product-image-container";
       imageContainer.style.cssText = `
@@ -74714,96 +74809,59 @@ return a / b;`;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-
             z-index: 9998;
-
             display: none;
-
             width: 90%;
             max-width: 600px;
-
             max-height: 55vh;
-
             border-radius: 20px;
-
             overflow: hidden;
-
             background: rgba(0,0,0,0.85);
-
-            box-shadow:
-                0 12px 40px rgba(0,0,0,0.5);
-
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
             pointer-events: none;
         `;
       const image2 = document.createElement("img");
       image2.id = "product-image";
+      image2.alt = "Product image";
       image2.style.cssText = `
             width: 100%;
             height: auto;
-
             max-height: 55vh;
-
             object-fit: contain;
-
             display: block;
         `;
       imageContainer.appendChild(image2);
-      document.body.appendChild(
-        imageContainer
-      );
+      document.body.appendChild(imageContainer);
       const root = document.createElement("div");
       root.id = "model-ui-root";
       root.style.cssText = `
             position: fixed;
-
             left: 0;
             right: 0;
             bottom: 0;
-
             z-index: 9999;
-
             pointer-events: none;
-
             display: flex;
             flex-direction: column;
-
             align-items: center;
-
-            padding:
-                0 12px
-                max(16px, env(safe-area-inset-right))
-                max(20px, env(safe-area-inset-bottom))
-                max(16px, env(safe-area-inset-left));
-
-            font-family:
-                system-ui,
-                -apple-system,
-                BlinkMacSystemFont,
-                "Segoe UI",
-                Roboto,
-                sans-serif;
-
+            padding: 0 12px max(16px, env(safe-area-inset-bottom));
+            font-family: system-ui, -apple-system, BlinkMacSystemFont,
+                "Segoe UI", Roboto, sans-serif;
             box-sizing: border-box;
         `;
       const filterPanel = document.createElement("div");
       filterPanel.id = "menu-filter-panel";
       filterPanel.style.cssText = `
             pointer-events: auto;
-
             width: 100%;
             max-width: 520px;
-
             margin-bottom: 8px;
-
             display: flex;
-
             gap: 8px;
-
             overflow-x: auto;
-
             scrollbar-width: none;
-
             padding: 2px;
+            box-sizing: border-box;
         `;
       const typeButtons = document.createElement("div");
       typeButtons.style.cssText = `
@@ -74812,367 +74870,174 @@ return a / b;`;
             flex-shrink: 0;
         `;
       const createFilterButton = (label, value) => {
-        const button = document.createElement(
-          "button"
-        );
+        const button = document.createElement("button");
         button.textContent = label;
         button.dataset.type = value;
         button.style.cssText = `
-                    border: none;
-
-                    padding:
-                        9px 13px;
-
-                    border-radius:
-                        999px;
-
-                    background:
-                        rgba(0,0,0,0.72);
-
-                    color: white;
-
-                    font-size: 13px;
-
-                    font-weight: 600;
-
-                    cursor: pointer;
-
-                    backdrop-filter:
-                        blur(8px);
-
-                    -webkit-backdrop-filter:
-                        blur(8px);
-
-                    white-space: nowrap;
-
-                    touch-action: manipulation;
-                `;
-        button.onclick = () => {
-          this.setType(value);
-        };
+                border: none;
+                padding: 9px 13px;
+                border-radius: 999px;
+                background: rgba(0,0,0,0.72);
+                color: white;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                white-space: nowrap;
+                touch-action: manipulation;
+            `;
+        button.onclick = () => this.setType(value);
         return button;
       };
-      typeButtons.appendChild(
-        createFilterButton(
-          "All",
-          "all"
-        )
-      );
-      typeButtons.appendChild(
-        createFilterButton(
-          "Meals",
-          "meal"
-        )
-      );
-      typeButtons.appendChild(
-        createFilterButton(
-          "Drinks",
-          "drink"
-        )
-      );
-      filterPanel.appendChild(
-        typeButtons
-      );
-      const categorySelect = document.createElement(
-        "select"
-      );
+      typeButtons.appendChild(createFilterButton("Meals", "meal"));
+      typeButtons.appendChild(createFilterButton("Drinks", "drink"));
+      filterPanel.appendChild(typeButtons);
+      const categorySelect = document.createElement("select");
       categorySelect.id = "category-select";
       categorySelect.style.cssText = `
             border: none;
-
-            padding:
-                9px 12px;
-
-            border-radius:
-                999px;
-
-            background:
-                rgba(0,0,0,0.72);
-
+            padding: 9px 12px;
+            border-radius: 999px;
+            background: rgba(0,0,0,0.72);
             color: white;
-
             font-size: 13px;
-
             font-weight: 600;
-
             outline: none;
-
             max-width: 180px;
-
-            backdrop-filter:
-                blur(8px);
-
-            -webkit-backdrop-filter:
-                blur(8px);
         `;
       categorySelect.onchange = () => {
-        this.setCategory(
-          categorySelect.value
-        );
+        this.setCategory(categorySelect.value);
       };
-      filterPanel.appendChild(
-        categorySelect
-      );
-      root.appendChild(
-        filterPanel
-      );
+      filterPanel.appendChild(categorySelect);
+      root.appendChild(filterPanel);
       const panel = document.createElement("div");
       panel.id = "product-panel";
       panel.style.cssText = `
             pointer-events: none;
-
             width: 100%;
-
             max-width: 420px;
-
-            background:
-                rgba(0,0,0,0.72);
-
-            backdrop-filter:
-                blur(10px);
-
-            -webkit-backdrop-filter:
-                blur(10px);
-
-            border-radius:
-                16px;
-
-            padding:
-                14px 18px;
-
-            margin-bottom:
-                10px;
-
+            background: rgba(0,0,0,0.72);
+            border-radius: 16px;
+            padding: 14px 18px;
+            margin-bottom: 10px;
             color: white;
-
-            box-shadow:
-                0 8px 24px
-                rgba(0,0,0,0.35);
-
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
             box-sizing: border-box;
         `;
       const title = document.createElement("div");
       title.id = "product-title";
       title.style.cssText = `
             font-size: 20px;
-
             font-weight: 700;
-
             margin-bottom: 5px;
-
             line-height: 1.25;
         `;
       const description = document.createElement("div");
       description.id = "product-description";
       description.style.cssText = `
             font-size: 13px;
-
             opacity: 0.9;
-
             line-height: 1.4;
-
             margin-bottom: 8px;
         `;
       const price = document.createElement("div");
       price.id = "product-price";
       price.style.cssText = `
             font-size: 21px;
-
             font-weight: 700;
-
             color: #4ade80;
         `;
       const counter = document.createElement("div");
       counter.id = "product-counter";
       counter.style.cssText = `
             font-size: 11px;
-
             opacity: 0.65;
-
             margin-top: 5px;
         `;
-      panel.appendChild(title);
-      panel.appendChild(description);
-      panel.appendChild(price);
-      panel.appendChild(counter);
+      panel.append(title, description, price, counter);
       root.appendChild(panel);
       const status = document.createElement("div");
       status.id = "menu-status";
       status.style.cssText = `
             color: white;
-
             font-size: 12px;
-
             margin-bottom: 6px;
-
-            text-shadow:
-                0 2px 5px black;
-
+            text-shadow: 0 2px 5px black;
             min-height: 16px;
+            text-align: center;
         `;
       root.appendChild(status);
       const buttons = document.createElement("div");
       buttons.style.cssText = `
             display: flex;
-
             gap: 8px;
-
             pointer-events: auto;
-
             flex-wrap: wrap;
-
             justify-content: center;
-
             max-width: 520px;
         `;
       const buttonStyle = `
             pointer-events: auto;
-
-            padding:
-                11px 14px;
-
+            padding: 11px 14px;
             font-size: 13px;
-
             font-weight: 600;
-
             border-radius: 12px;
-
             border: none;
-
-            background:
-                rgba(0,0,0,0.75);
-
+            background: rgba(0,0,0,0.75);
             color: white;
-
-            backdrop-filter:
-                blur(6px);
-
-            -webkit-backdrop-filter:
-                blur(6px);
-
             cursor: pointer;
-
-            box-shadow:
-                0 4px 14px
-                rgba(0,0,0,0.35);
-
-            user-select: none;
-
-            -webkit-user-select: none;
-
+            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
             touch-action: manipulation;
-
             min-height: 42px;
         `;
       const prev = document.createElement("button");
       prev.textContent = "\u25C0 Prev";
       prev.style.cssText = buttonStyle;
-      prev.onclick = () => {
-        this.prev();
-      };
+      prev.onclick = () => this.prev();
       const rotate2 = document.createElement("button");
       rotate2.textContent = "\u{1F504} Hold to Rotate";
       rotate2.style.cssText = buttonStyle;
-      rotate2.addEventListener(
-        "mousedown",
-        (event) => {
-          event.preventDefault();
-          this.startRotation();
+      rotate2.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        this.startRotation();
+        try {
+          rotate2.setPointerCapture(event.pointerId);
+        } catch (_) {
         }
-      );
-      rotate2.addEventListener(
-        "mouseup",
-        () => {
-          this.stopRotation();
-        }
-      );
-      rotate2.addEventListener(
-        "mouseleave",
-        () => {
-          this.stopRotation();
-        }
-      );
-      rotate2.addEventListener(
-        "touchstart",
-        (event) => {
-          event.preventDefault();
-          this.startRotation();
-        },
-        {
-          passive: false
-        }
-      );
-      rotate2.addEventListener(
-        "touchend",
-        () => {
-          this.stopRotation();
-        }
-      );
-      rotate2.addEventListener(
-        "touchcancel",
-        () => {
-          this.stopRotation();
-        }
-      );
+      });
+      const stopRotate = () => this.stopRotation();
+      rotate2.addEventListener("pointerup", stopRotate);
+      rotate2.addEventListener("pointercancel", stopRotate);
+      rotate2.addEventListener("lostpointercapture", stopRotate);
+      rotate2.addEventListener("contextmenu", (event) => event.preventDefault());
       const next = document.createElement("button");
       next.textContent = "Next \u25B6";
       next.style.cssText = buttonStyle;
-      next.onclick = () => {
-        this.next();
-      };
-      buttons.appendChild(prev);
-      buttons.appendChild(rotate2);
-      buttons.appendChild(next);
+      next.onclick = () => this.next();
+      buttons.append(prev, rotate2, next);
       root.appendChild(buttons);
       const zoomRow = document.createElement("div");
       zoomRow.style.cssText = `
             display: flex;
-
             gap: 7px;
-
             pointer-events: auto;
-
             margin-top: 8px;
-
             justify-content: center;
         `;
       const createZoomButton = (id, label, factor) => {
-        const button = document.createElement(
-          "button"
-        );
+        const button = document.createElement("button");
         button.id = id;
         button.className = "zoom-btn";
         button.textContent = label;
         button.style.cssText = buttonStyle;
-        button.onclick = () => {
-          this.setZoom(factor);
-        };
+        button.onclick = () => this.setZoom(factor);
         return button;
       };
-      zoomRow.appendChild(
-        createZoomButton(
-          "zoom-x05",
-          "\xD70.5",
-          0.5
-        )
+      zoomRow.append(
+        createZoomButton("zoom-x05", "\xD70.5", 0.5),
+        createZoomButton("zoom-x1", "\xD71", 1),
+        createZoomButton("zoom-x2", "\xD72", 2)
       );
-      zoomRow.appendChild(
-        createZoomButton(
-          "zoom-x1",
-          "\xD71",
-          1
-        )
-      );
-      zoomRow.appendChild(
-        createZoomButton(
-          "zoom-x2",
-          "\xD72",
-          2
-        )
-      );
-      root.appendChild(
-        zoomRow
-      );
+      root.appendChild(zoomRow);
       document.body.appendChild(root);
       this.updateFilterUI();
     }
@@ -75180,56 +75045,33 @@ return a / b;`;
      * UPDATE FILTER UI
      * ========================================= */
     updateFilterUI() {
-      const select4 = document.getElementById(
-        "category-select"
-      );
-      if (!select4) {
-        return;
-      }
-      select4.innerHTML = "";
-      for (const category of this.categories) {
-        const option = document.createElement(
-          "option"
-        );
-        option.value = category;
-        option.textContent = category === "all" ? "All Categories" : category;
-        option.selected = category === this.currentCategory;
-        select4.appendChild(
-          option
-        );
-      }
-      document.querySelectorAll(
-        "[data-type]"
-      ).forEach((button) => {
-        const active = button.dataset.type === this.currentType;
-        if (active) {
-          button.style.background = "rgba(74,222,128,0.85)";
-          button.style.color = "#06140b";
-        } else {
-          button.style.background = "rgba(0,0,0,0.72)";
-          button.style.color = "white";
+      const select4 = document.getElementById("category-select");
+      if (select4) {
+        select4.innerHTML = "";
+        for (const category of this.categories) {
+          const option = document.createElement("option");
+          option.value = category;
+          option.textContent = category === "all" ? this.currentType === "meal" ? "All Meal Categories" : "All Drink Categories" : category;
+          option.selected = category === this.currentCategory;
+          select4.appendChild(option);
         }
+      }
+      document.querySelectorAll("[data-type]").forEach((button) => {
+        const active = button.dataset.type === this.currentType;
+        button.style.background = active ? "rgba(74,222,128,0.85)" : "rgba(0,0,0,0.72)";
+        button.style.color = active ? "#06140b" : "white";
       });
     }
     /* =========================================
-     * UPDATE PRODUCT UI
+     * UPDATE PRODUCT DETAILS
      * ========================================= */
     updateUI() {
-      const title = document.getElementById(
-        "product-title"
-      );
-      const description = document.getElementById(
-        "product-description"
-      );
-      const price = document.getElementById(
-        "product-price"
-      );
-      const counter = document.getElementById(
-        "product-counter"
-      );
-      if (!title || !description || !price || !counter) {
+      const title = document.getElementById("product-title");
+      const description = document.getElementById("product-description");
+      const price = document.getElementById("product-price");
+      const counter = document.getElementById("product-counter");
+      if (!title || !description || !price || !counter)
         return;
-      }
       if (!this.currentProduct) {
         title.textContent = "";
         description.textContent = "";
@@ -75239,33 +75081,26 @@ return a / b;`;
       }
       title.textContent = this.currentProduct.name;
       description.textContent = this.currentProduct.desc;
-      price.textContent = this.formatPrice(
-        this.currentProduct.price
-      );
+      price.textContent = this.formatPrice(this.currentProduct.price);
       counter.textContent = `${this.currentIndex + 1} / ${this.filteredProducts.length}`;
       window.dispatchEvent(
-        new CustomEvent(
-          "armenu-update",
-          {
-            detail: {
-              product: this.currentProduct,
-              index: this.currentIndex,
-              total: this.filteredProducts.length,
-              categories: this.categories,
-              type: this.currentType,
-              category: this.currentCategory
-            }
+        new CustomEvent("armenu-update", {
+          detail: {
+            product: this.currentProduct,
+            index: this.currentIndex,
+            total: this.filteredProducts.length,
+            categories: this.categories,
+            type: this.currentType,
+            category: this.currentCategory
           }
-        )
+        })
       );
     }
     /* =========================================
-     * STATUS
+     * STATUS MESSAGE
      * ========================================= */
     setStatus(message) {
-      const status = document.getElementById(
-        "menu-status"
-      );
+      const status = document.getElementById("menu-status");
       if (status) {
         status.textContent = message || "";
       }
@@ -75273,313 +75108,14 @@ return a / b;`;
   };
   __publicField(ARMenuManager, "TypeName", "ar-menu-manager");
   __publicField(ARMenuManager, "Properties", {
-    apiBase: Property.string("https://your-backend.com/api"),
+    apiBase: Property.string("https://api.abincii.com/api"),
+    // You can enter either the R2 domain or the full /models/ URL.
+    // getModelUrl() normalizes both forms automatically.
     r2Base: Property.string(
-      "https://pub-xxxxxxxx.r2.dev/models/"
+      "https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models/"
     ),
     displayRoot: Property.object(),
     modelScale: Property.float(0.3),
-    rotateSpeed: Property.float(90)
-  });
-
-  // js/ModelCarousel.js
-  var ModelCarousel_exports = {};
-  __export(ModelCarousel_exports, {
-    ModelCarousel: () => ModelCarousel
-  });
-  var ModelCarousel = class extends Component3 {
-    init() {
-      this.models = [];
-      this.currentIndex = 0;
-      this.isRotating = false;
-      this.currentScaleFactor = 1;
-      this.zoomSettings = {
-        0.5: { scale: 0.5, fov: 85 },
-        1: { scale: 1, fov: 60 },
-        2: { scale: 2, fov: 75 }
-      };
-      this.initialScales = [];
-      this.products = [
-        {
-          title: "Isi Azu",
-          description: "Roasted catfish with sauce.",
-          price: "\u20A614,500",
-          image: null
-        },
-        {
-          title: "Nkwobi",
-          description: "cooked cow foot with sauce.",
-          price: "\u20A612,900",
-          image: null
-        },
-        {
-          title: "Odu Azu",
-          description: "Roasted catfish tail.",
-          price: "\u20A612,000",
-          image: null
-        },
-        {
-          title: "Abacha",
-          description: "African salad with fish.",
-          price: "\u20A618,500",
-          image: null
-        },
-        {
-          title: "Isiewu",
-          description: "Goat head with spice.",
-          price: "\u20A615,000",
-          image: null
-        },
-        {
-          title: "White rice and stew",
-          description: "white rice with chicken and tomoato stew.",
-          price: "\u20A612,000",
-          image: "images/wtrice.JPG"
-        },
-        {
-          title: "Jollof rice",
-          description: "jollof and chicken.",
-          price: "\u20A612,500",
-          image: "images/jolof.JPG"
-        }
-      ];
-    }
-    start() {
-      this.models = [
-        this.model0,
-        this.model1,
-        this.model2,
-        this.model3,
-        this.model4,
-        this.model5,
-        this.model6
-      ];
-      this.initialScales = this.models.map((m) => {
-        if (!m)
-          return [1, 1, 1];
-        const s = new Float32Array(3);
-        m.getScalingLocal(s);
-        return [s[0], s[1], s[2]];
-      });
-      this.currentIndex = Math.max(0, Math.min(this.startIndex, this.products.length - 1));
-      this.createUI();
-      this.showProduct(this.currentIndex);
-      this.setZoom(1);
-    }
-    update(dt) {
-      if (!this.isRotating)
-        return;
-      const model = this.models[this.currentIndex];
-      if (!model)
-        return;
-      const angle2 = this.rotateSpeed * dt * (Math.PI / 180);
-      model.rotateAxisAngleRadObject([0, 1, 0], angle2);
-    }
-    /** Apply current scale factor to the currently visible model */
-    applyScaleToCurrent() {
-      const model = this.models[this.currentIndex];
-      if (!model)
-        return;
-      const base = this.initialScales[this.currentIndex] || [1, 1, 1];
-      const f = this.currentScaleFactor;
-      model.setScalingLocal([
-        base[0] * f,
-        base[1] * f,
-        base[2] * f
-      ]);
-    }
-    /** Set both object scale multiplier and camera FOV */
-    setZoom(factor) {
-      const setting = this.zoomSettings[factor];
-      if (!setting)
-        return;
-      this.currentScaleFactor = setting.scale;
-      this.applyScaleToCurrent();
-      const view = this.engine.scene.mainView;
-      if (view) {
-        view.fov = setting.fov;
-      }
-    }
-    createUI() {
-      const old = document.getElementById("model-ui-root");
-      if (old)
-        old.remove();
-      const root = document.createElement("div");
-      root.id = "model-ui-root";
-      root.style.cssText = `
-            position: fixed;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 9999;
-            pointer-events: none;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 0 16px 30px;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        `;
-      const imageContainer = document.createElement("div");
-      imageContainer.id = "product-image-container";
-      imageContainer.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 9998;
-            display: none;
-            width: 95%;
-            max-width: 900px;
-            border-radius: 20px;
-            overflow: hidden;
-            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
-            pointer-events: none;
-        `;
-      const img = document.createElement("img");
-      img.id = "product-image";
-      img.style.cssText = `
-            width: 100%;
-            height: auto;
-            display: block;
-            background: #111;
-        `;
-      imageContainer.appendChild(img);
-      document.body.appendChild(imageContainer);
-      const panel = document.createElement("div");
-      panel.id = "product-panel";
-      panel.style.cssText = `
-            pointer-events: none;
-            width: 100%;
-            max-width: 420px;
-            background: rgba(0, 0, 0, 0.72);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-radius: 16px;
-            padding: 18px 20px;
-            margin-bottom: 18px;
-            color: white;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-        `;
-      const title = document.createElement("div");
-      title.id = "product-title";
-      title.style.cssText = `font-size: 20px; font-weight: 700; margin-bottom: 6px; line-height: 1.25;`;
-      const description = document.createElement("div");
-      description.id = "product-description";
-      description.style.cssText = `font-size: 14px; opacity: 0.9; line-height: 1.4; margin-bottom: 12px;`;
-      const price = document.createElement("div");
-      price.id = "product-price";
-      price.style.cssText = `font-size: 22px; font-weight: 700; color: #4ade80;`;
-      panel.appendChild(title);
-      panel.appendChild(description);
-      panel.appendChild(price);
-      const buttons = document.createElement("div");
-      buttons.style.cssText = `display: flex; gap: 10px; pointer-events: none; flex-wrap: wrap; justify-content: center;`;
-      const btnStyle = `
-            pointer-events: auto;
-            padding: 12px 18px;
-            font-size: 14px;
-            font-weight: 600;
-            border-radius: 12px;
-            border: none;
-            background: rgba(0, 0, 0, 0.75);
-            color: white;
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
-            cursor: pointer;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-            user-select: none;
-            -webkit-user-select: none;
-            touch-action: none;
-        `;
-      const prevBtn = document.createElement("button");
-      prevBtn.textContent = "\u25C0 Prev";
-      prevBtn.style.cssText = btnStyle;
-      prevBtn.onclick = () => this.prev();
-      const nextBtn = document.createElement("button");
-      nextBtn.textContent = "Next \u25B6";
-      nextBtn.style.cssText = btnStyle;
-      nextBtn.onclick = () => this.next();
-      const rotateBtn = document.createElement("button");
-      rotateBtn.textContent = "\u{1F504} Hold to Rotate";
-      rotateBtn.style.cssText = btnStyle;
-      rotateBtn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        this.isRotating = true;
-      });
-      rotateBtn.addEventListener("mouseup", () => this.isRotating = false);
-      rotateBtn.addEventListener("mouseleave", () => this.isRotating = false);
-      rotateBtn.addEventListener("touchstart", (e) => {
-        e.preventDefault();
-        this.isRotating = true;
-      }, { passive: false });
-      rotateBtn.addEventListener("touchend", () => this.isRotating = false);
-      rotateBtn.addEventListener("touchcancel", () => this.isRotating = false);
-      const makeZoomBtn = (label, factor) => {
-        const btn = document.createElement("button");
-        btn.textContent = label;
-        btn.style.cssText = btnStyle;
-        btn.onclick = () => this.setZoom(factor);
-        return btn;
-      };
-      const zoom05Btn = makeZoomBtn("x0.5", 0.5);
-      const zoom1Btn = makeZoomBtn("x1", 1);
-      const zoom2Btn = makeZoomBtn("x2", 2);
-      buttons.appendChild(prevBtn);
-      buttons.appendChild(rotateBtn);
-      buttons.appendChild(nextBtn);
-      buttons.appendChild(zoom05Btn);
-      buttons.appendChild(zoom1Btn);
-      buttons.appendChild(zoom2Btn);
-      root.appendChild(panel);
-      root.appendChild(buttons);
-      document.body.appendChild(root);
-    }
-    showProduct(index) {
-      const product = this.products[index];
-      if (!product)
-        return;
-      document.getElementById("product-title").textContent = product.title;
-      document.getElementById("product-description").textContent = product.description;
-      document.getElementById("product-price").textContent = product.price;
-      const imageContainer = document.getElementById("product-image-container");
-      const img = document.getElementById("product-image");
-      this.models.forEach((m) => {
-        if (m)
-          m.active = false;
-      });
-      const has3DModel = this.models[index] != null;
-      if (has3DModel) {
-        this.models[index].active = true;
-        imageContainer.style.display = "none";
-        this.applyScaleToCurrent();
-      } else {
-        if (product.image) {
-          img.src = product.image;
-          imageContainer.style.display = "block";
-        } else {
-          imageContainer.style.display = "none";
-        }
-      }
-    }
-    next() {
-      this.currentIndex = (this.currentIndex + 1) % this.products.length;
-      this.showProduct(this.currentIndex);
-    }
-    prev() {
-      this.currentIndex = (this.currentIndex - 1 + this.products.length) % this.products.length;
-      this.showProduct(this.currentIndex);
-    }
-  };
-  __publicField(ModelCarousel, "TypeName", "model-carousel");
-  __publicField(ModelCarousel, "Properties", {
-    model0: Property.object(),
-    model1: Property.object(),
-    model2: Property.object(),
-    model3: Property.object(),
-    model4: Property.object(),
-    model5: Property.object(),
-    model6: Property.object(),
-    startIndex: Property.int(0),
     rotateSpeed: Property.float(90)
   });
 
@@ -75770,7 +75306,6 @@ return a / b;`;
   _registerEditor(dist_exports);
   _registerEditor(dist_exports2);
   _registerEditor(ARMenuManager_exports);
-  _registerEditor(ModelCarousel_exports);
   _registerEditor(TrackingSmoother_exports);
   _registerEditor(ZoomControls_exports);
   _registerEditor(filters_exports);

@@ -877,18 +877,6 @@
                     "tracking-smoother": {
                         "smoothFactor": 12.0
                     }
-                },
-                {
-                    "type": "model-carousel",
-                    "model-carousel": {
-                        "model0": null,
-                        "model1": null,
-                        "model2": null,
-                        "model3": null,
-                        "model4": null,
-                        "model5": null,
-                        "model6": null
-                    }
                 }
             ]
         },
@@ -946,8 +934,8 @@
                 {
                     "type": "ar-menu-manager",
                     "ar-menu-manager": {
-                        "r2Base": "https://your-backend.com/api",
-                        "apiBase": "https://api.abincii.com/",
+                        "r2Base": "https://pub-5f00c6484f634858a427e577f435334d.r2.dev",
+                        "apiBase": "https://api.abincii.com/api",
                         "displayRoot": "7"
                     }
                 }

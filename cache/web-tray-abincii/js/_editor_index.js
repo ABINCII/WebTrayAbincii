@@ -4,8 +4,6 @@ import * as __wonderlandengine_mind_ar_tracking from '@wonderlandengine/mind-ar-
 _registerEditor(__wonderlandengine_mind_ar_tracking);
 import * as _C__Users_ALIENWARE_X17_R2_Documents_WonderlandEngine_web_tray_abincii_js_ARMenuManager_js from 'C:/Users/ALIENWARE X17 R2/Documents/WonderlandEngine/web-tray-abincii/js/ARMenuManager.js';
 _registerEditor(_C__Users_ALIENWARE_X17_R2_Documents_WonderlandEngine_web_tray_abincii_js_ARMenuManager_js);
-import * as _C__Users_ALIENWARE_X17_R2_Documents_WonderlandEngine_web_tray_abincii_js_ModelCarousel_js from 'C:/Users/ALIENWARE X17 R2/Documents/WonderlandEngine/web-tray-abincii/js/ModelCarousel.js';
-_registerEditor(_C__Users_ALIENWARE_X17_R2_Documents_WonderlandEngine_web_tray_abincii_js_ModelCarousel_js);
 import * as _C__Users_ALIENWARE_X17_R2_Documents_WonderlandEngine_web_tray_abincii_js_TrackingSmoother_js from 'C:/Users/ALIENWARE X17 R2/Documents/WonderlandEngine/web-tray-abincii/js/TrackingSmoother.js';
 _registerEditor(_C__Users_ALIENWARE_X17_R2_Documents_WonderlandEngine_web_tray_abincii_js_TrackingSmoother_js);
 import * as _C__Users_ALIENWARE_X17_R2_Documents_WonderlandEngine_web_tray_abincii_js_ZoomControls_js from 'C:/Users/ALIENWARE X17 R2/Documents/WonderlandEngine/web-tray-abincii/js/ZoomControls.js';

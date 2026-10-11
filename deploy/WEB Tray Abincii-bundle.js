@@ -67239,14 +67239,14 @@ var ARMenuManager = class extends Component3 {
     this.currentIndex = 0;
     this.currentProduct = null;
     this.modelPool = /* @__PURE__ */ new Map();
-    this.activeModelRoot = null;
     this.modelPrefabs = /* @__PURE__ */ new Map();
     this.modelLoads = /* @__PURE__ */ new Map();
+    this.activeModelRoot = null;
+    this.modelRequestId = 0;
     this.preloadQueue = [];
     this.preloadQueuedIds = /* @__PURE__ */ new Set();
     this.preloadWorkerRunning = false;
     this.maxCachedInstances = 8;
-    this.modelRequestId = 0;
     this.isRotating = false;
     this.currentScaleFactor = 1;
     this.zoomSettings = {
@@ -67270,6 +67270,7 @@ var ARMenuManager = class extends Component3 {
     }
     console.log("Restaurant:", this.restaurantId);
     console.log("Table:", this.tableId);
+    console.log("Configured R2 base:", this.r2Base);
     this.setZoom(1);
     await this.fetchMenu(this.restaurantId);
     this.buildCategories();
@@ -67284,15 +67285,16 @@ var ARMenuManager = class extends Component3 {
     }
   }
   /* =========================================
-   * FETCH MENU
+   * FETCH RESTAURANT MENU
    * ========================================= */
   async fetchMenu(restaurantId) {
     try {
       this.setStatus("Loading menu...");
-      const url = `${this.apiBase}/restaurants/menu?restaurant=${encodeURIComponent(restaurantId)}`;
+      const base = String(this.apiBase || "").replace(/\/+$/, "");
+      const url = `${base}/restaurants/menu?restaurant=${encodeURIComponent(restaurantId)}`;
       const response = await fetch(url);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(`Menu API returned HTTP ${response.status}`);
       }
       const data = await response.json();
       if (!data.success) {
@@ -67318,22 +67320,23 @@ var ARMenuManager = class extends Component3 {
         img: drink.drinkImg || "",
         raw: drink
       }));
-      this.products = [...meals, ...drinks];
+      this.products = [...meals, ...drinks].filter((p2) => p2.id);
       console.log(
-        `Loaded ${this.products.length} products for restaurant ${restaurantId}`
+        `Loaded ${this.products.length} products for restaurant ${restaurantId}`,
+        {
+          meals: meals.length,
+          drinks: drinks.length
+        }
       );
       this.setStatus("");
     } catch (error) {
-      console.error(
-        "ARMenuManager: Failed to fetch menu:",
-        error
-      );
+      console.error("ARMenuManager: Failed to fetch menu:", error);
       this.products = [];
-      this.setStatus("Unable to load menu.");
+      this.setStatus("Unable to load menu. Check the API connection.");
     }
   }
   /* =========================================
-   * CATEGORY GENERATION
+   * CATEGORY FILTERING
    * ========================================= */
   buildCategories() {
     const categorySet = /* @__PURE__ */ new Set();
@@ -67351,10 +67354,8 @@ var ARMenuManager = class extends Component3 {
     if (this.currentCategory !== "all" && !categorySet.has(this.currentCategory)) {
       this.currentCategory = "all";
     }
+    this.updateFilterUI();
   }
-  /* =========================================
-   * FILTERING
-   * ========================================= */
   applyFilters() {
     this.filteredProducts = this.products.filter((product) => {
       const typeMatches = product.type === this.currentType;
@@ -67368,7 +67369,7 @@ var ARMenuManager = class extends Component3 {
   setType(type) {
     if (type !== "meal" && type !== "drink") {
       console.warn(
-        'ARMenuManager: type must be "meal" or "drink".'
+        'ARMenuManager: Type must be "meal" or "drink".'
       );
       return;
     }
@@ -67402,25 +67403,93 @@ var ARMenuManager = class extends Component3 {
     }
   }
   /* =========================================
-   * NEXT / PREVIOUS
+   * PRODUCT NAVIGATION
    * ========================================= */
   next() {
-    if (this.filteredProducts.length === 0)
+    if (!this.filteredProducts.length)
       return;
     this.currentIndex = (this.currentIndex + 1) % this.filteredProducts.length;
     this.showProduct(this.currentIndex);
   }
   prev() {
-    if (this.filteredProducts.length === 0)
+    if (!this.filteredProducts.length)
       return;
     this.currentIndex = (this.currentIndex - 1 + this.filteredProducts.length) % this.filteredProducts.length;
     this.showProduct(this.currentIndex);
   }
   /* =========================================
-   * SHOW PRODUCT
+   * PRODUCT ID AND CORRECTED R2 URL
+   * ========================================= */
+  getModelId(product) {
+    return product && product.id ? String(product.id) : "";
+  }
+  getModelUrl(product) {
+    const modelId = this.getModelId(product);
+    if (!modelId) {
+      throw new Error("Missing MongoDB product ID.");
+    }
+    let base = String(this.r2Base || "").trim();
+    if (!base) {
+      throw new Error("R2 base URL is empty.");
+    }
+    base = base.replace(/\/+$/, "");
+    if (!/\/models$/i.test(base)) {
+      base += "/models";
+    }
+    const url = `${base}/${encodeURIComponent(modelId)}.glb`;
+    console.log("Constructed GLB URL:", url);
+    return url;
+  }
+  /* =========================================
+   * LOAD AND CACHE GLB PREFABS
+   * ========================================= */
+  ensurePrefab(product) {
+    const modelId = this.getModelId(product);
+    if (!modelId) {
+      return Promise.reject(
+        new Error("Missing MongoDB product ID.")
+      );
+    }
+    if (this.modelPrefabs.has(modelId)) {
+      return Promise.resolve(this.modelPrefabs.get(modelId));
+    }
+    if (this.modelLoads.has(modelId)) {
+      return this.modelLoads.get(modelId);
+    }
+    let url;
+    try {
+      url = this.getModelUrl(product);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    console.log(
+      `Loading GLB for product ID: ${modelId}`,
+      url
+    );
+    const loadPromise = this.engine.loadGLTF({ file: url }).then((prefab) => {
+      this.modelPrefabs.set(modelId, prefab);
+      this.dispatchModelReady(product, true);
+      return prefab;
+    }).catch((error) => {
+      console.error(
+        `ARMenuManager: GLB load failed for "${modelId}".`,
+        {
+          url,
+          error
+        }
+      );
+      throw error;
+    }).finally(() => {
+      this.modelLoads.delete(modelId);
+    });
+    this.modelLoads.set(modelId, loadPromise);
+    return loadPromise;
+  }
+  /* =========================================
+   * SHOW SELECTED PRODUCT
    * ========================================= */
   async showProduct(index) {
-    if (this.filteredProducts.length === 0)
+    if (!this.filteredProducts.length)
       return;
     index = Math.max(
       0,
@@ -67433,24 +67502,23 @@ var ARMenuManager = class extends Component3 {
     this.hideImageFallback();
     const requestId = ++this.modelRequestId;
     const product = this.currentProduct;
+    const modelId = this.getModelId(product);
     if (product.img) {
       this.showImageFallback(product.img);
     }
-    const modelId = this.getModelId(product);
     if (!modelId) {
-      this.setStatus(
-        "No model ID is available for this product."
-      );
+      this.setStatus("No model ID is available for this product.");
+      this.dispatchModelReady(product, false);
       return;
     }
-    const cachedInstance = this.modelPool.get(modelId);
-    if (cachedInstance) {
+    const cached = this.modelPool.get(modelId);
+    if (cached) {
       if (requestId !== this.modelRequestId)
         return;
-      cachedInstance.lastUsed = Date.now();
-      cachedInstance.root.active = true;
-      this.activeModelRoot = cachedInstance.root;
-      this.placeModel(cachedInstance.root);
+      cached.lastUsed = Date.now();
+      cached.root.active = true;
+      this.activeModelRoot = cached.root;
+      this.placeModel(cached.root);
       this.applyScaleToCurrent();
       this.hideImageFallback();
       this.setStatus("");
@@ -67463,13 +67531,13 @@ var ARMenuManager = class extends Component3 {
         return;
       const result = this.engine.scene.instantiate(prefab);
       const root = result.root;
+      if (!root) {
+        throw new Error("GLB prefab did not create a root object.");
+      }
       root.parent = this.displayRoot;
       root.setTranslationLocal([0, 0.1, 0]);
-      root.setScalingLocal([
-        this.modelScale,
-        this.modelScale,
-        this.modelScale
-      ]);
+      const scale7 = this.modelScale * this.currentScaleFactor;
+      root.setScalingLocal([scale7, scale7, scale7]);
       root.active = true;
       this.modelPool.set(modelId, {
         root,
@@ -67477,78 +67545,39 @@ var ARMenuManager = class extends Component3 {
         lastUsed: Date.now()
       });
       this.activeModelRoot = root;
-      this.applyScaleToCurrent();
       this.hideImageFallback();
       this.setStatus("");
       this.evictOldModelInstances(modelId);
       this.dispatchModelReady(product, true);
     } catch (error) {
-      console.warn(
-        `ARMenuManager: Could not load GLB for product ID "${modelId}".`,
+      console.error(
+        `ARMenuManager: Could not display GLB "${modelId}".`,
         error
       );
       if (requestId === this.modelRequestId) {
         this.showImageFallback(product.img);
         this.setStatus(
-          product.img ? "Showing product image." : "3D model unavailable."
+          product.img ? "3D model unavailable. Showing product image." : "3D model unavailable. Check the GLB URL and R2 access."
         );
         this.dispatchModelReady(product, false);
       }
     }
   }
   /* =========================================
-   * MODEL ID / PREFAB LOADING
-   * ========================================= */
-  getModelId(product) {
-    return product && product.id ? String(product.id) : "";
-  }
-  getModelUrl(product) {
-    const modelId = this.getModelId(product);
-    return `${this.r2Base}${encodeURIComponent(modelId)}.glb`;
-  }
-  ensurePrefab(product) {
-    const modelId = this.getModelId(product);
-    if (!modelId) {
-      return Promise.reject(
-        new Error("Missing MongoDB product ID.")
-      );
-    }
-    if (this.modelPrefabs.has(modelId)) {
-      return Promise.resolve(
-        this.modelPrefabs.get(modelId)
-      );
-    }
-    if (this.modelLoads.has(modelId)) {
-      return this.modelLoads.get(modelId);
-    }
-    const url = this.getModelUrl(product);
-    console.log(
-      "Loading GLB for product ID:",
-      modelId,
-      url
-    );
-    const loadPromise = this.engine.loadGLTF({ file: url }).then((prefab) => {
-      this.modelPrefabs.set(modelId, prefab);
-      this.dispatchModelReady(product, true);
-      return prefab;
-    }).finally(() => {
-      this.modelLoads.delete(modelId);
-    });
-    this.modelLoads.set(modelId, loadPromise);
-    return loadPromise;
-  }
-  /* =========================================
    * RESTAURANT-SPECIFIC BACKGROUND PRELOAD
    * ========================================= */
   startRestaurantPreload() {
     for (const product of this.products) {
-      const modelId = this.getModelId(product);
-      if (!modelId || this.modelPrefabs.has(modelId) || this.modelLoads.has(modelId) || this.preloadQueuedIds.has(modelId)) {
+      const id = this.getModelId(product);
+      if (!id || this.modelPrefabs.has(id) || this.modelLoads.has(id) || this.preloadQueuedIds.has(id)) {
         continue;
       }
       this.preloadQueue.push(product);
-      this.preloadQueuedIds.add(modelId);
+      this.preloadQueuedIds.add(id);
     }
+    console.log(
+      `ARMenuManager: Queued ${this.preloadQueue.length} models for background preload.`
+    );
     this.pumpPreloadQueue();
   }
   pumpPreloadQueue() {
@@ -67559,17 +67588,25 @@ var ARMenuManager = class extends Component3 {
       try {
         while (this.preloadQueue.length > 0) {
           const product = this.preloadQueue.shift();
-          const modelId = this.getModelId(product);
-          this.preloadQueuedIds.delete(modelId);
-          if (!modelId || this.modelPrefabs.has(modelId)) {
+          const id = this.getModelId(product);
+          this.preloadQueuedIds.delete(id);
+          if (!id || this.modelPrefabs.has(id)) {
             continue;
           }
           try {
             await this.ensurePrefab(product);
+            console.log(
+              `ARMenuManager: Preloaded model "${id}".`
+            );
           } catch (error) {
-            console.warn(
-              `ARMenuManager: Background preload failed for "${modelId}".`,
-              error
+            let url = "URL unavailable";
+            try {
+              url = this.getModelUrl(product);
+            } catch (_) {
+            }
+            console.error(
+              `ARMenuManager: Background preload failed for "${id}".`,
+              { url, error }
             );
           }
         }
@@ -67598,9 +67635,7 @@ var ARMenuManager = class extends Component3 {
       return;
     const candidates = Array.from(this.modelPool.entries()).filter(
       ([id, entry]) => id !== keepModelId && entry.root !== this.activeModelRoot
-    ).sort(
-      (a, b) => a[1].lastUsed - b[1].lastUsed
-    );
+    ).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
     while (this.modelPool.size > this.maxCachedInstances && candidates.length > 0) {
       const [id, entry] = candidates.shift();
       try {
@@ -67611,17 +67646,13 @@ var ARMenuManager = class extends Component3 {
         this.modelPool.delete(id);
       } catch (error) {
         console.warn(
-          "ARMenuManager: Could not evict model instance:",
-          id,
+          `ARMenuManager: Could not evict model "${id}".`,
           error
         );
         break;
       }
     }
   }
-  /* =========================================
-   * MODEL VISIBILITY / PLACEMENT
-   * ========================================= */
   hideActiveModel() {
     if (!this.activeModelRoot)
       return;
@@ -67673,11 +67704,7 @@ var ARMenuManager = class extends Component3 {
     document.querySelectorAll(".zoom-btn").forEach((button) => {
       button.classList.remove("active");
     });
-    let activeId = "zoom-x1";
-    if (factor === 0.5)
-      activeId = "zoom-x05";
-    if (factor === 2)
-      activeId = "zoom-x2";
+    const activeId = factor === 0.5 ? "zoom-x05" : factor === 2 ? "zoom-x2" : "zoom-x1";
     document.getElementById(activeId)?.classList.add("active");
   }
   applyScaleToCurrent() {
@@ -67691,7 +67718,7 @@ var ARMenuManager = class extends Component3 {
     ]);
   }
   /* =========================================
-   * IMAGE FALLBACK
+   * 2D IMAGE FALLBACK
    * ========================================= */
   showImageFallback(imgUrl) {
     const container = document.getElementById(
@@ -67704,6 +67731,10 @@ var ARMenuManager = class extends Component3 {
       container.style.display = "none";
       return;
     }
+    img.onerror = () => {
+      container.style.display = "none";
+      console.warn("ARMenuManager: Product image failed to load:", imgUrl);
+    };
     img.src = imgUrl;
     container.style.display = "block";
   }
@@ -67714,14 +67745,6 @@ var ARMenuManager = class extends Component3 {
     if (container) {
       container.style.display = "none";
     }
-  }
-  /* =========================================
-   * LEGACY NAME SANITIZATION
-   * ========================================= */
-  // Kept for compatibility with any other script that calls it.
-  // GLB URLs now use MongoDB product IDs, not product names.
-  sanitizeName(name) {
-    return String(name || "").toLowerCase().trim().replace(/&/g, "and").replace(/\+/g, "plus").replace(/['’]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-");
   }
   /* =========================================
    * PRICE FORMATTING
@@ -67766,6 +67789,7 @@ var ARMenuManager = class extends Component3 {
         `;
     const image2 = document.createElement("img");
     image2.id = "product-image";
+    image2.alt = "Product image";
     image2.style.cssText = `
             width: 100%;
             height: auto;
@@ -67787,9 +67811,7 @@ var ARMenuManager = class extends Component3 {
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 0 12px max(16px, env(safe-area-inset-right))
-                max(20px, env(safe-area-inset-bottom))
-                max(16px, env(safe-area-inset-left));
+            padding: 0 12px max(16px, env(safe-area-inset-bottom));
             font-family: system-ui, -apple-system, BlinkMacSystemFont,
                 "Segoe UI", Roboto, sans-serif;
             box-sizing: border-box;
@@ -67806,6 +67828,7 @@ var ARMenuManager = class extends Component3 {
             overflow-x: auto;
             scrollbar-width: none;
             padding: 2px;
+            box-sizing: border-box;
         `;
     const typeButtons = document.createElement("div");
     typeButtons.style.cssText = `
@@ -67826,20 +67849,14 @@ var ARMenuManager = class extends Component3 {
                 font-size: 13px;
                 font-weight: 600;
                 cursor: pointer;
-                backdrop-filter: blur(8px);
-                -webkit-backdrop-filter: blur(8px);
                 white-space: nowrap;
                 touch-action: manipulation;
             `;
       button.onclick = () => this.setType(value);
       return button;
     };
-    typeButtons.appendChild(
-      createFilterButton("Meals", "meal")
-    );
-    typeButtons.appendChild(
-      createFilterButton("Drinks", "drink")
-    );
+    typeButtons.appendChild(createFilterButton("Meals", "meal"));
+    typeButtons.appendChild(createFilterButton("Drinks", "drink"));
     filterPanel.appendChild(typeButtons);
     const categorySelect = document.createElement("select");
     categorySelect.id = "category-select";
@@ -67853,8 +67870,6 @@ var ARMenuManager = class extends Component3 {
             font-weight: 600;
             outline: none;
             max-width: 180px;
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
         `;
     categorySelect.onchange = () => {
       this.setCategory(categorySelect.value);
@@ -67868,8 +67883,6 @@ var ARMenuManager = class extends Component3 {
             width: 100%;
             max-width: 420px;
             background: rgba(0,0,0,0.72);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
             border-radius: 16px;
             padding: 14px 18px;
             margin-bottom: 10px;
@@ -67907,10 +67920,7 @@ var ARMenuManager = class extends Component3 {
             opacity: 0.65;
             margin-top: 5px;
         `;
-    panel.appendChild(title);
-    panel.appendChild(description);
-    panel.appendChild(price);
-    panel.appendChild(counter);
+    panel.append(title, description, price, counter);
     root.appendChild(panel);
     const status = document.createElement("div");
     status.id = "menu-status";
@@ -67920,6 +67930,7 @@ var ARMenuManager = class extends Component3 {
             margin-bottom: 6px;
             text-shadow: 0 2px 5px black;
             min-height: 16px;
+            text-align: center;
         `;
     root.appendChild(status);
     const buttons = document.createElement("div");
@@ -67940,12 +67951,8 @@ var ARMenuManager = class extends Component3 {
             border: none;
             background: rgba(0,0,0,0.75);
             color: white;
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
             cursor: pointer;
             box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-            user-select: none;
-            -webkit-user-select: none;
             touch-action: manipulation;
             min-height: 42px;
         `;
@@ -67956,25 +67963,24 @@ var ARMenuManager = class extends Component3 {
     const rotate2 = document.createElement("button");
     rotate2.textContent = "\u{1F504} Hold to Rotate";
     rotate2.style.cssText = buttonStyle;
-    rotate2.addEventListener("mousedown", (event) => {
+    rotate2.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       this.startRotation();
+      try {
+        rotate2.setPointerCapture(event.pointerId);
+      } catch (_) {
+      }
     });
-    rotate2.addEventListener("mouseup", () => this.stopRotation());
-    rotate2.addEventListener("mouseleave", () => this.stopRotation());
-    rotate2.addEventListener("touchstart", (event) => {
-      event.preventDefault();
-      this.startRotation();
-    }, { passive: false });
-    rotate2.addEventListener("touchend", () => this.stopRotation());
-    rotate2.addEventListener("touchcancel", () => this.stopRotation());
+    const stopRotate = () => this.stopRotation();
+    rotate2.addEventListener("pointerup", stopRotate);
+    rotate2.addEventListener("pointercancel", stopRotate);
+    rotate2.addEventListener("lostpointercapture", stopRotate);
+    rotate2.addEventListener("contextmenu", (event) => event.preventDefault());
     const next = document.createElement("button");
     next.textContent = "Next \u25B6";
     next.style.cssText = buttonStyle;
     next.onclick = () => this.next();
-    buttons.appendChild(prev);
-    buttons.appendChild(rotate2);
-    buttons.appendChild(next);
+    buttons.append(prev, rotate2, next);
     root.appendChild(buttons);
     const zoomRow = document.createElement("div");
     zoomRow.style.cssText = `
@@ -67993,13 +67999,9 @@ var ARMenuManager = class extends Component3 {
       button.onclick = () => this.setZoom(factor);
       return button;
     };
-    zoomRow.appendChild(
-      createZoomButton("zoom-x05", "\xD70.5", 0.5)
-    );
-    zoomRow.appendChild(
-      createZoomButton("zoom-x1", "\xD71", 1)
-    );
-    zoomRow.appendChild(
+    zoomRow.append(
+      createZoomButton("zoom-x05", "\xD70.5", 0.5),
+      createZoomButton("zoom-x1", "\xD71", 1),
       createZoomButton("zoom-x2", "\xD72", 2)
     );
     root.appendChild(zoomRow);
@@ -68011,29 +68013,24 @@ var ARMenuManager = class extends Component3 {
    * ========================================= */
   updateFilterUI() {
     const select4 = document.getElementById("category-select");
-    if (!select4)
-      return;
-    select4.innerHTML = "";
-    for (const category of this.categories) {
-      const option = document.createElement("option");
-      option.value = category;
-      option.textContent = category === "all" ? this.currentType === "meal" ? "All Meal Categories" : "All Drink Categories" : category;
-      option.selected = category === this.currentCategory;
-      select4.appendChild(option);
+    if (select4) {
+      select4.innerHTML = "";
+      for (const category of this.categories) {
+        const option = document.createElement("option");
+        option.value = category;
+        option.textContent = category === "all" ? this.currentType === "meal" ? "All Meal Categories" : "All Drink Categories" : category;
+        option.selected = category === this.currentCategory;
+        select4.appendChild(option);
+      }
     }
     document.querySelectorAll("[data-type]").forEach((button) => {
       const active = button.dataset.type === this.currentType;
-      if (active) {
-        button.style.background = "rgba(74,222,128,0.85)";
-        button.style.color = "#06140b";
-      } else {
-        button.style.background = "rgba(0,0,0,0.72)";
-        button.style.color = "white";
-      }
+      button.style.background = active ? "rgba(74,222,128,0.85)" : "rgba(0,0,0,0.72)";
+      button.style.color = active ? "#06140b" : "white";
     });
   }
   /* =========================================
-   * UPDATE PRODUCT UI
+   * UPDATE PRODUCT DETAILS
    * ========================================= */
   updateUI() {
     const title = document.getElementById("product-title");
@@ -68053,19 +68050,21 @@ var ARMenuManager = class extends Component3 {
     description.textContent = this.currentProduct.desc;
     price.textContent = this.formatPrice(this.currentProduct.price);
     counter.textContent = `${this.currentIndex + 1} / ${this.filteredProducts.length}`;
-    window.dispatchEvent(new CustomEvent("armenu-update", {
-      detail: {
-        product: this.currentProduct,
-        index: this.currentIndex,
-        total: this.filteredProducts.length,
-        categories: this.categories,
-        type: this.currentType,
-        category: this.currentCategory
-      }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("armenu-update", {
+        detail: {
+          product: this.currentProduct,
+          index: this.currentIndex,
+          total: this.filteredProducts.length,
+          categories: this.categories,
+          type: this.currentType,
+          category: this.currentCategory
+        }
+      })
+    );
   }
   /* =========================================
-   * STATUS
+   * STATUS MESSAGE
    * ========================================= */
   setStatus(message) {
     const status = document.getElementById("menu-status");
@@ -68077,6 +68076,8 @@ var ARMenuManager = class extends Component3 {
 __publicField(ARMenuManager, "TypeName", "ar-menu-manager");
 __publicField(ARMenuManager, "Properties", {
   apiBase: Property2.string("https://api.abincii.com/api"),
+  // You can enter either the R2 domain or the full /models/ URL.
+  // getModelUrl() normalizes both forms automatically.
   r2Base: Property2.string(
     "https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models/"
   ),
