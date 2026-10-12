@@ -1,6 +1,5 @@
 {
-  "name": "web-tray-abincii",
-  "version": "1.0.0",
   "private": true,
-  "description": "Static Wonderland Engine deployment"
+  "name": "abincii-tray-deploy",
+  "version": "1.0.0"
 }
