@@ -67584,7 +67584,7 @@ var ARMenuManager = class extends Component3 {
       return this.modelLoads.get(modelId);
     }
     const url = this.getModelUrl(product);
-    const loadPromise = this.engine.loadGLTF({ url }).then((prefab) => {
+    const loadPromise = this.engine.loadGLTF({ file: url }).then((prefab) => {
       this.modelPrefabs.set(modelId, prefab);
       return prefab;
     }).finally(() => {
