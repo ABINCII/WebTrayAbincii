@@ -43,7 +43,8 @@
             }
         },
         "runtime": {
-            "loadUncompressedImagesAsBitmap": false
+            "loadUncompressedImagesAsBitmap": false,
+            "enableRuntimeGltf": true
         },
         "gi": {
             "probeVolume": {
@@ -934,7 +935,7 @@
                 {
                     "type": "ar-menu-manager",
                     "ar-menu-manager": {
-                        "r2Base": "https://pub-5f00c6484f634858a427e577f435334d.r2.dev",
+                        "r2Base": "https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models",
                         "apiBase": "https://api.abincii.com/api",
                         "displayRoot": "7"
                     }

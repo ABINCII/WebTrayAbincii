@@ -22,7 +22,7 @@ const RuntimeOptions = {
     webgl2: true,
     webgpu: false,
     physx: false,
-    loader: false,
+    loader: true,
     xrFramebufferScaleFactor: 1,
     loadUncompressedImagesAsBitmap: false,
     xrOfferSession: {
