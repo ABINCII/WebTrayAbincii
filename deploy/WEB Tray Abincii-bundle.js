@@ -67535,7 +67535,7 @@ var ARMenuManager = class extends Component3 {
     }
     const url = this.getModelUrl(product);
     console.log("Loading GLB:", modelId, url);
-    const loadPromise = this.engine.loadGLTF({ file: url }).then((prefab) => {
+    const loadPromise = this.engine.loadGLTF({ url }).then((prefab) => {
       this.modelPrefabs.set(modelId, prefab);
       return prefab;
     }).finally(() => {
