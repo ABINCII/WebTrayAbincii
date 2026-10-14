@@ -67241,12 +67241,14 @@ var ARMenuManager = class extends Component3 {
     this.modelPool = /* @__PURE__ */ new Map();
     this.modelPrefabs = /* @__PURE__ */ new Map();
     this.modelLoads = /* @__PURE__ */ new Map();
+    this.prefabLastUsed = /* @__PURE__ */ new Map();
     this.availableModelIds = /* @__PURE__ */ new Set();
     this.modelManifestLoaded = false;
     this.preloadQueue = [];
     this.preloadQueuedIds = /* @__PURE__ */ new Set();
     this.preloadWorkerRunning = false;
-    this.maxCachedInstances = 8;
+    this.maxCachedInstances = 3;
+    this.maxCachedPrefabs = 6;
     this.activeModelRoot = null;
     this.modelRequestId = 0;
     this.isRotating = false;
@@ -67277,10 +67279,9 @@ var ARMenuManager = class extends Component3 {
     this.applyFilters();
     if (this.filteredProducts.length > 0) {
       this.showProduct(0);
-      this.startRestaurantPreload();
     } else {
       this.setStatus(
-        this.currentType === "meal" ? "No meals found. Select Drinks to view drinks." : "No drinks found. Select Meals to view drinks."
+        this.currentType === "meal" ? "No meals found. Select Drinks to view drinks." : "No drinks found. Select Meals to view meals."
       );
     }
   }
@@ -67320,9 +67321,7 @@ var ARMenuManager = class extends Component3 {
         raw: item
       }));
       this.products = [...meals, ...drinks];
-      console.log(
-        `Loaded ${this.products.length} menu products.`
-      );
+      console.log(`Loaded ${this.products.length} menu products.`);
     } catch (error) {
       console.error("ARMenuManager: Menu fetch failed:", error);
       this.products = [];
@@ -67330,7 +67329,7 @@ var ARMenuManager = class extends Component3 {
     }
   }
   /* =========================================
-     MODEL MANIFEST
+     CLOUDFLARE R2 MODEL MANIFEST
   ========================================= */
   getR2ModelsBase() {
     let base = String(this.r2Base || "").trim().replace(/\/+$/, "");
@@ -67345,8 +67344,8 @@ var ARMenuManager = class extends Component3 {
   async loadModelManifest() {
     this.availableModelIds.clear();
     this.modelManifestLoaded = false;
-    const manifestUrl = `${this.getR2ModelsBase()}/models.json`;
     try {
+      const manifestUrl = `${this.getR2ModelsBase()}/models.json`;
       console.log("Loading 3D model manifest:", manifestUrl);
       const response = await fetch(manifestUrl, {
         cache: "no-cache"
@@ -67502,6 +67501,7 @@ var ARMenuManager = class extends Component3 {
     this.hideActiveModel();
     this.hideImageFallback();
     this.updateUI();
+    this.startRestaurantPreload();
     if (product.img) {
       this.showImageFallback(product.img);
     }
@@ -67514,14 +67514,13 @@ var ARMenuManager = class extends Component3 {
       return;
     }
     const cached = this.modelPool.get(modelId);
-    if (cached) {
+    if (cached && cached.root) {
       if (requestId !== this.modelRequestId)
         return;
-      cached.root.active = true;
       cached.lastUsed = Date.now();
-      this.activeModelRoot = cached.root;
       this.placeModel(cached.root);
-      this.applyScaleToCurrent();
+      cached.root.active = true;
+      this.activeModelRoot = cached.root;
       this.hideImageFallback();
       this.setStatus("");
       this.dispatchModelReady(product, true);
@@ -67535,12 +67534,7 @@ var ARMenuManager = class extends Component3 {
       const result = this.engine.scene.instantiate(prefab);
       const root = result.root;
       root.parent = this.displayRoot;
-      root.setTranslationLocal([0, 0.1, 0]);
-      root.setScalingLocal([
-        this.modelScale,
-        this.modelScale,
-        this.modelScale
-      ]);
+      this.placeModel(root);
       root.active = true;
       this.modelPool.set(modelId, {
         root,
@@ -67552,12 +67546,10 @@ var ARMenuManager = class extends Component3 {
       this.hideImageFallback();
       this.setStatus("");
       this.evictOldModelInstances(modelId);
+      this.trimPrefabCache(modelId);
       this.dispatchModelReady(product, true);
     } catch (error) {
-      console.warn(
-        `Could not load GLB for ${modelId}:`,
-        error
-      );
+      console.warn(`Could not load GLB for ${modelId}:`, error);
       if (requestId === this.modelRequestId) {
         this.showImageFallback(product.img);
         this.setStatus(
@@ -67568,25 +67560,38 @@ var ARMenuManager = class extends Component3 {
     }
   }
   /* =========================================
-     LOAD AND CACHE GLB PREFABS
+     GLTF PREFAB LOADING AND CACHE
   ========================================= */
   ensurePrefab(product) {
     const modelId = this.getModelId(product);
     if (!modelId) {
       return Promise.reject(
-        new Error("Product has no registered 3D model.")
+        new Error("Product has no registered GLB in models.json.")
       );
     }
     if (this.modelPrefabs.has(modelId)) {
+      this.prefabLastUsed.set(modelId, Date.now());
       return Promise.resolve(this.modelPrefabs.get(modelId));
     }
     if (this.modelLoads.has(modelId)) {
       return this.modelLoads.get(modelId);
     }
     const url = this.getModelUrl(product);
+    if (!url) {
+      return Promise.reject(new Error("Could not construct a GLB URL."));
+    }
+    console.log("Loading GLB for product ID:", modelId, url);
     const loadPromise = this.engine.loadGLTF({ url }).then((prefab) => {
       this.modelPrefabs.set(modelId, prefab);
+      this.prefabLastUsed.set(modelId, Date.now());
+      this.trimPrefabCache(modelId);
       return prefab;
+    }).catch((error) => {
+      console.error(
+        `ARMenuManager: GLB load failed for product "${modelId}" at ${url}.`,
+        error
+      );
+      throw error;
     }).finally(() => {
       this.modelLoads.delete(modelId);
     });
@@ -67597,13 +67602,15 @@ var ARMenuManager = class extends Component3 {
      BACKGROUND PRELOAD
   ========================================= */
   startRestaurantPreload() {
-    if (!this.modelManifestLoaded) {
-      console.warn(
-        "Preload skipped because models.json did not load."
-      );
+    if (!this.modelManifestLoaded)
       return;
-    }
-    for (const product of this.products) {
+    const nextProducts = this.filteredProducts.slice(
+      this.currentIndex + 1,
+      this.currentIndex + 3
+    );
+    this.preloadQueue = [];
+    this.preloadQueuedIds.clear();
+    for (const product of nextProducts) {
       const modelId = this.getModelId(product);
       if (!modelId || this.modelPrefabs.has(modelId) || this.modelLoads.has(modelId) || this.preloadQueuedIds.has(modelId)) {
         continue;
@@ -67611,18 +67618,16 @@ var ARMenuManager = class extends Component3 {
       this.preloadQueue.push(product);
       this.preloadQueuedIds.add(modelId);
     }
-    console.log(
-      `Preloading ${this.preloadQueue.length} available GLB model(s).`
-    );
     this.pumpPreloadQueue();
   }
   pumpPreloadQueue() {
-    if (this.preloadWorkerRunning)
+    if (this.preloadWorkerRunning) {
       return;
+    }
     this.preloadWorkerRunning = true;
     const run = async () => {
       try {
-        while (this.preloadQueue.length) {
+        while (this.preloadQueue.length > 0) {
           const product = this.preloadQueue.shift();
           const modelId = this.getModelId(product);
           this.preloadQueuedIds.delete(modelId);
@@ -67641,6 +67646,9 @@ var ARMenuManager = class extends Component3 {
         }
       } finally {
         this.preloadWorkerRunning = false;
+        if (this.preloadQueue.length > 0) {
+          this.pumpPreloadQueue();
+        }
       }
     };
     run();
@@ -67657,7 +67665,29 @@ var ARMenuManager = class extends Component3 {
     );
   }
   /* =========================================
-     MODEL CACHE MANAGEMENT
+     PREFAB CACHE EVICTION
+  ========================================= */
+  trimPrefabCache(keepModelId) {
+    if (this.modelPrefabs.size <= this.maxCachedPrefabs)
+      return;
+    const pooledIds = new Set(this.modelPool.keys());
+    const candidates = Array.from(this.modelPrefabs.keys()).filter(
+      (id) => id !== keepModelId && !pooledIds.has(id) && !this.modelLoads.has(id)
+    ).sort(
+      (a, b) => (this.prefabLastUsed.get(a) || 0) - (this.prefabLastUsed.get(b) || 0)
+    );
+    while (this.modelPrefabs.size > this.maxCachedPrefabs && candidates.length > 0) {
+      const id = candidates.shift();
+      this.modelPrefabs.delete(id);
+      this.prefabLastUsed.delete(id);
+      console.log(
+        "ARMenuManager: Evicted cached GLTF reference:",
+        id
+      );
+    }
+  }
+  /* =========================================
+     SCENE INSTANCE CACHE MANAGEMENT
   ========================================= */
   evictOldModelInstances(keepModelId) {
     if (this.modelPool.size <= this.maxCachedInstances)
@@ -67665,12 +67695,14 @@ var ARMenuManager = class extends Component3 {
     const candidates = Array.from(this.modelPool.entries()).filter(
       ([id, entry]) => id !== keepModelId && entry.root !== this.activeModelRoot
     ).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-    while (this.modelPool.size > this.maxCachedInstances && candidates.length) {
+    while (this.modelPool.size > this.maxCachedInstances && candidates.length > 0) {
       const [id, entry] = candidates.shift();
       try {
-        entry.root.active = false;
-        if (typeof entry.root.destroy === "function") {
-          entry.root.destroy();
+        if (entry.root) {
+          entry.root.active = false;
+          if (typeof entry.root.destroy === "function") {
+            entry.root.destroy();
+          }
         }
         this.modelPool.delete(id);
       } catch (error) {
@@ -67680,21 +67712,45 @@ var ARMenuManager = class extends Component3 {
     }
   }
   hideActiveModel() {
-    if (!this.activeModelRoot)
-      return;
-    this.activeModelRoot.active = false;
+    this.stopRotation();
+    const previousRoot = this.activeModelRoot;
+    if (previousRoot) {
+      for (const entry of this.modelPool.values()) {
+        if (entry.root === previousRoot) {
+          entry.lastUsed = Date.now();
+          break;
+        }
+      }
+    }
     for (const entry of this.modelPool.values()) {
-      if (entry.root === this.activeModelRoot) {
-        entry.lastUsed = Date.now();
-        break;
+      if (entry.root) {
+        entry.root.active = false;
       }
     }
     this.activeModelRoot = null;
   }
+  /* =========================================
+     MODEL ORIENTATION AND PLACEMENT
+  ========================================= */
+  applyModelOrientation(root) {
+    if (!root || typeof root.setRotationLocal !== "function")
+      return;
+    const degrees = Number(this.modelRotationXDegrees) || 0;
+    const halfAngle = degrees * Math.PI / 360;
+    root.setRotationLocal([
+      Math.sin(halfAngle),
+      0,
+      0,
+      Math.cos(halfAngle)
+    ]);
+  }
   placeModel(root) {
-    if (root) {
-      root.setTranslationLocal([0, 0.1, 0]);
-    }
+    if (!root)
+      return;
+    this.applyModelOrientation(root);
+    root.setTranslationLocal([0, 0.01, 0]);
+    const scale7 = this.modelScale * this.currentScaleFactor;
+    root.setScalingLocal([scale7, scale7, scale7]);
   }
   /* =========================================
      ROTATION
@@ -67780,8 +67836,9 @@ var ARMenuManager = class extends Component3 {
   ========================================= */
   setStatus(message) {
     const element = document.getElementById("menu-status");
-    if (element)
+    if (element) {
       element.textContent = message || "";
+    }
   }
   formatPrice(price) {
     if (price === null || price === void 0 || price === "") {
@@ -67849,11 +67906,17 @@ var ARMenuManager = class extends Component3 {
     const imageContainer = document.createElement("div");
     imageContainer.id = "product-image-container";
     imageContainer.style.cssText = `
-            position:fixed;top:50%;left:50%;
+            position:fixed;
+            top:50%;
+            left:50%;
             transform:translate(-50%,-50%);
-            z-index:9998;display:none;width:90%;
-            max-width:600px;max-height:55vh;
-            border-radius:20px;overflow:hidden;
+            z-index:9998;
+            display:none;
+            width:90%;
+            max-width:600px;
+            max-height:55vh;
+            border-radius:20px;
+            overflow:hidden;
             background:rgba(0,0,0,.85);
             pointer-events:none;
         `;
@@ -67861,27 +67924,41 @@ var ARMenuManager = class extends Component3 {
     image2.id = "product-image";
     image2.alt = "Product image";
     image2.style.cssText = `
-            display:block;width:100%;height:auto;
-            max-height:55vh;object-fit:contain;
+            display:block;
+            width:100%;
+            height:auto;
+            max-height:55vh;
+            object-fit:contain;
         `;
     imageContainer.appendChild(image2);
     document.body.appendChild(imageContainer);
     const root = document.createElement("div");
     root.id = "model-ui-root";
     root.style.cssText = `
-            position:fixed;left:0;right:0;bottom:0;
-            z-index:9999;pointer-events:none;
-            display:flex;flex-direction:column;
-            align-items:center;padding:12px;
+            position:fixed;
+            left:0;
+            right:0;
+            bottom:0;
+            z-index:9999;
+            pointer-events:none;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            padding:12px;
             padding-bottom:max(20px,env(safe-area-inset-bottom));
             font-family:system-ui,sans-serif;
             box-sizing:border-box;
         `;
     const filterPanel = document.createElement("div");
     filterPanel.style.cssText = `
-            pointer-events:auto;width:100%;max-width:520px;
-            margin-bottom:8px;display:flex;gap:8px;
-            overflow-x:auto;align-items:center;
+            pointer-events:auto;
+            width:100%;
+            max-width:520px;
+            margin-bottom:8px;
+            display:flex;
+            gap:8px;
+            overflow-x:auto;
+            align-items:center;
         `;
     const typeButtons = document.createElement("div");
     typeButtons.style.cssText = "display:flex;gap:6px;flex-shrink:0;";
@@ -67890,9 +67967,14 @@ var ARMenuManager = class extends Component3 {
       button.textContent = label;
       button.className = extraClass;
       button.style.cssText = `
-                border:0;padding:10px 13px;border-radius:12px;
-                background:rgba(0,0,0,.78);color:white;
-                font-size:13px;font-weight:600;cursor:pointer;
+                border:0;
+                padding:10px 13px;
+                border-radius:12px;
+                background:rgba(0,0,0,.78);
+                color:white;
+                font-size:13px;
+                font-weight:600;
+                cursor:pointer;
                 touch-action:manipulation;
             `;
       button.onclick = action;
@@ -67910,9 +67992,13 @@ var ARMenuManager = class extends Component3 {
     const categorySelect = document.createElement("select");
     categorySelect.id = "category-select";
     categorySelect.style.cssText = `
-            padding:10px 12px;border:0;border-radius:12px;
-            background:rgba(0,0,0,.78);color:white;
-            font-size:13px;max-width:180px;
+            padding:10px 12px;
+            border:0;
+            border-radius:12px;
+            background:rgba(0,0,0,.78);
+            color:white;
+            font-size:13px;
+            max-width:180px;
         `;
     categorySelect.onchange = () => this.setCategory(categorySelect.value);
     filterPanel.appendChild(categorySelect);
@@ -67920,10 +68006,15 @@ var ARMenuManager = class extends Component3 {
     const panel = document.createElement("div");
     panel.id = "product-panel";
     panel.style.cssText = `
-            pointer-events:none;width:100%;max-width:420px;
-            background:rgba(0,0,0,.76);color:white;
-            border-radius:16px;padding:14px 18px;
-            margin-bottom:8px;box-sizing:border-box;
+            pointer-events:none;
+            width:100%;
+            max-width:420px;
+            background:rgba(0,0,0,.76);
+            color:white;
+            border-radius:16px;
+            padding:14px 18px;
+            margin-bottom:8px;
+            box-sizing:border-box;
         `;
     const title = document.createElement("div");
     title.id = "product-title";
@@ -67942,17 +68033,28 @@ var ARMenuManager = class extends Component3 {
     const status = document.createElement("div");
     status.id = "menu-status";
     status.style.cssText = `
-            color:white;font-size:12px;margin-bottom:7px;
-            min-height:16px;text-shadow:0 2px 5px black;
+            color:white;
+            font-size:12px;
+            margin-bottom:7px;
+            min-height:16px;
+            text-shadow:0 2px 5px black;
         `;
     root.appendChild(status);
     const controls = document.createElement("div");
     controls.style.cssText = `
-            pointer-events:auto;display:flex;gap:8px;
-            flex-wrap:wrap;justify-content:center;max-width:520px;
+            pointer-events:auto;
+            display:flex;
+            gap:8px;
+            flex-wrap:wrap;
+            justify-content:center;
+            max-width:520px;
         `;
-    controls.appendChild(makeButton("\u25C0 Prev", () => this.prev()));
-    controls.appendChild(makeButton("Next \u25B6", () => this.next()));
+    controls.appendChild(
+      makeButton("\u25C0 Prev", () => this.prev())
+    );
+    controls.appendChild(
+      makeButton("Next \u25B6", () => this.next())
+    );
     const rotate2 = makeButton("\u{1F504} Hold to Rotate", () => {
     });
     rotate2.addEventListener("pointerdown", (event) => {
@@ -67990,6 +68092,7 @@ __publicField(ARMenuManager, "Properties", {
   ),
   displayRoot: Property2.object(),
   modelScale: Property2.float(0.3),
+  modelRotationXDegrees: Property2.float(90),
   rotateSpeed: Property2.float(90)
 });
 
