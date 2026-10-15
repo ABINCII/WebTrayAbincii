@@ -50,16 +50,17 @@
             "probeVolume": {
                 "enabled": false,
                 "scaling": [
-                    6.2074909,
-                    5.7373619,
-                    3.5628056
+                    0.0,
+                    0.0,
+                    0.0
                 ],
                 "translation": [
-                    -0.1391772,
-                    -0.1276911,
-                    0.9074745
+                    0.0,
+                    0.0,
+                    0.0
                 ],
-                "scenario": "1"
+                "scenario": "1",
+                "quality": "low"
             }
         }
     },
@@ -182,6 +183,10 @@
         },
         "27": {
             "fileName": "static/images/wtrice.JPG",
+            "importerName": ""
+        },
+        "28": {
+            "fileName": "textures/abaccc111.glb",
             "importerName": ""
         }
     },
@@ -484,6 +489,12 @@
             "link": {
                 "name": "3DModel.004",
                 "file": "models\\Oduazu101.glb"
+            }
+        },
+        "16": {
+            "link": {
+                "name": "3DModel",
+                "file": "textures\\abaccc111.glb"
             }
         }
     },
@@ -812,6 +823,12 @@
                 "name": "3DModel.004",
                 "file": "models\\Oduazu101.glb"
             }
+        },
+        "27": {
+            "link": {
+                "name": "3DModel",
+                "file": "textures\\abaccc111.glb"
+            }
         }
     },
     "objects": {
@@ -881,33 +898,6 @@
                 }
             ]
         },
-        "17": {
-            "name": "Light",
-            "components": [
-                {
-                    "type": "light",
-                    "light": {
-                        "type": "sun"
-                    }
-                }
-            ],
-            "translation": [
-                0.0,
-                0.0,
-                3.8481922
-            ],
-            "rotation": [
-                0.0,
-                0.0,
-                0.0,
-                1.0
-            ],
-            "scaling": [
-                1.0,
-                1.0,
-                1.0
-            ]
-        },
         "18": {
             "link": {
                 "name": "Light",
@@ -937,14 +927,113 @@
                     "ar-menu-manager": {
                         "r2Base": "https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models",
                         "apiBase": "https://api.abincii.com/api",
-                        "displayRoot": "7"
+                        "displayRoot": "7",
+                        "modelScale": 5.0,
+                        "fallbackImageUrl": "IMAGEnotfound.jpg"
                     }
                 }
             ]
         },
         "7": {
             "name": "AR Menu Root",
-            "parent": "2"
+            "parent": "2",
+            "translation": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.7071068,
+                0.7071068
+            ],
+            "scaling": [
+                0.9999995,
+                0.9999995,
+                1.0
+            ]
+        },
+        "19": {
+            "name": "Light.000",
+            "components": [
+                {
+                    "type": "light",
+                    "light": {
+                        "type": "sun"
+                    }
+                }
+            ],
+            "translation": [
+                0.0,
+                0.4468508,
+                -0.0598918
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scaling": [
+                1.0,
+                1.0,
+                1.0
+            ]
+        },
+        "20": {
+            "name": "Light.000",
+            "translation": [
+                2.9802322387695313e-8,
+                0.1181136,
+                -0.6145794
+            ],
+            "rotation": [
+                -0.7174845,
+                0.140512,
+                0.088095,
+                0.6765437
+            ],
+            "scaling": [
+                0.9999961,
+                0.9999961,
+                0.9999951
+            ],
+            "components": [
+                {
+                    "type": "light",
+                    "light": {
+                        "type": "sun"
+                    }
+                }
+            ]
+        },
+        "21": {
+            "name": "Light.000",
+            "translation": [
+                4.6566128730773926e-8,
+                0.1562281,
+                0.374992
+            ],
+            "rotation": [
+                0.6817036,
+                -0.1335051,
+                -0.0837014,
+                0.7144582
+            ],
+            "scaling": [
+                0.9999979,
+                1.0000009,
+                1.0000007
+            ],
+            "components": [
+                {
+                    "type": "light",
+                    "light": {
+                        "type": "sun"
+                    }
+                }
+            ]
         }
     },
     "animations": {},

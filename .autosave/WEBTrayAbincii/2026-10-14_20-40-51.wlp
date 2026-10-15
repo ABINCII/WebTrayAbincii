@@ -43,7 +43,8 @@
             }
         },
         "runtime": {
-            "loadUncompressedImagesAsBitmap": false
+            "loadUncompressedImagesAsBitmap": false,
+            "enableRuntimeGltf": true
         },
         "gi": {
             "probeVolume": {
@@ -181,6 +182,10 @@
         },
         "27": {
             "fileName": "static/images/wtrice.JPG",
+            "importerName": ""
+        },
+        "28": {
+            "fileName": "textures/abaccc111.glb",
             "importerName": ""
         }
     },
@@ -483,6 +488,12 @@
             "link": {
                 "name": "3DModel.004",
                 "file": "models\\Oduazu101.glb"
+            }
+        },
+        "16": {
+            "link": {
+                "name": "3DModel",
+                "file": "textures\\abaccc111.glb"
             }
         }
     },
@@ -811,6 +822,12 @@
                 "name": "3DModel.004",
                 "file": "models\\Oduazu101.glb"
             }
+        },
+        "27": {
+            "link": {
+                "name": "3DModel",
+                "file": "textures\\abaccc111.glb"
+            }
         }
     },
     "objects": {
@@ -880,33 +897,6 @@
                 }
             ]
         },
-        "17": {
-            "name": "Light",
-            "components": [
-                {
-                    "type": "light",
-                    "light": {
-                        "type": "sun"
-                    }
-                }
-            ],
-            "translation": [
-                0.0,
-                0.0,
-                3.8481922
-            ],
-            "rotation": [
-                0.0,
-                0.0,
-                0.0,
-                1.0
-            ],
-            "scaling": [
-                1.0,
-                1.0,
-                1.0
-            ]
-        },
         "18": {
             "link": {
                 "name": "Light",
@@ -936,14 +926,86 @@
                     "ar-menu-manager": {
                         "r2Base": "https://pub-5f00c6484f634858a427e577f435334d.r2.dev/models",
                         "apiBase": "https://api.abincii.com/api",
-                        "displayRoot": "7"
+                        "displayRoot": "7",
+                        "modelScale": 5.0,
+                        "fallbackImageUrl": "/textures/IMAGEnotfound.jpg"
                     }
                 }
             ]
         },
         "7": {
             "name": "AR Menu Root",
-            "parent": "2"
+            "parent": "2",
+            "translation": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.7071068,
+                0.7071068
+            ],
+            "scaling": [
+                0.9999995,
+                0.9999995,
+                1.0
+            ]
+        },
+        "19": {
+            "name": "Light.000",
+            "components": [
+                {
+                    "type": "light",
+                    "light": {
+                        "type": "sun"
+                    }
+                }
+            ],
+            "translation": [
+                0.0,
+                0.3775061,
+                -0.0598919
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scaling": [
+                1.0,
+                1.0,
+                1.0
+            ]
+        },
+        "20": {
+            "name": "Light.000",
+            "translation": [
+                0.0,
+                0.33831,
+                -0.402615
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scaling": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "components": [
+                {
+                    "type": "light",
+                    "light": {
+                        "type": "sun"
+                    }
+                }
+            ]
         }
     },
     "animations": {},
