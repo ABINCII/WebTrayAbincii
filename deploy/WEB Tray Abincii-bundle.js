@@ -67482,7 +67482,6 @@ var ARMenuManager = class extends Component3 {
         product.img ? "3D preview unavailable; showing product image." : "Showing placeholder image."
       );
       this.dispatchModelReady(product, false);
-      this.startRestaurantPreload();
       return;
     }
     this.setStatus("Loading 3D model...");
@@ -67511,7 +67510,6 @@ var ARMenuManager = class extends Component3 {
         this.dispatchModelReady(product, false);
       }
     }
-    this.startRestaurantPreload();
   }
   /* GLTF PREFAB CACHE */
   ensurePrefab(product) {
