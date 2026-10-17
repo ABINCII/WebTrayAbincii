@@ -67248,8 +67248,6 @@ var ARMenuManager = class extends Component3 {
     this.preloadQueue = [];
     this.preloadQueuedIds = /* @__PURE__ */ new Set();
     this.preloadWorkerRunning = false;
-    this.preloadWorkerPromise = null;
-    this.maxCachedPrefabs = 3;
     this.modelRequestId = 0;
     this.isRotating = false;
     this.currentScaleFactor = 1;
@@ -67280,11 +67278,9 @@ var ARMenuManager = class extends Component3 {
     this.buildCategories();
     this.applyFilters();
     if (this.filteredProducts.length) {
-      await this.showProduct(0);
+      this.showProduct(0);
     } else {
-      this.setStatus(
-        "No meals found. Select Drinks to view drinks."
-      );
+      this.setStatus("No meals found. Select Drinks to view drinks.");
     }
   }
   /* MENU API */
@@ -67295,15 +67291,11 @@ var ARMenuManager = class extends Component3 {
       const url = base + "/restaurants/menu?restaurant=" + encodeURIComponent(restaurantId);
       const response = await fetch(url);
       if (!response.ok) {
-        throw new Error(
-          "Menu API HTTP " + response.status
-        );
+        throw new Error("Menu API HTTP " + response.status);
       }
       const data = await response.json();
       if (!data.success) {
-        throw new Error(
-          "Backend returned success=false"
-        );
+        throw new Error("Backend returned success=false");
       }
       const meals = (data.meal || []).map((meal) => ({
         type: "meal",
@@ -67326,10 +67318,7 @@ var ARMenuManager = class extends Component3 {
         raw: drink
       }));
       this.products = meals.concat(drinks);
-      console.log(
-        "Loaded menu products:",
-        this.products.length
-      );
+      console.log("Loaded menu products:", this.products.length);
       this.setStatus("");
     } catch (error) {
       console.error("Menu fetch failed:", error);
@@ -67354,20 +67343,15 @@ var ARMenuManager = class extends Component3 {
     if (!base)
       return;
     try {
-      const response = await fetch(
-        base + "models.json",
-        { cache: "no-cache" }
-      );
+      const response = await fetch(base + "models.json", {
+        cache: "no-cache"
+      });
       if (!response.ok) {
-        throw new Error(
-          "Manifest HTTP " + response.status
-        );
+        throw new Error("Manifest HTTP " + response.status);
       }
       const manifest = await response.json();
       if (!manifest || !Array.isArray(manifest.models)) {
-        throw new Error(
-          "models.json must contain a models array"
-        );
+        throw new Error("models.json must contain a models array");
       }
       for (const value of manifest.models) {
         const id = String(value || "").trim();
@@ -67381,22 +67365,16 @@ var ARMenuManager = class extends Component3 {
         this.availableModelIds.size
       );
     } catch (error) {
-      console.error(
-        "Failed to load R2 models.json:",
-        error
-      );
-      this.setStatus(
-        "3D previews unavailable; showing images."
-      );
+      console.error("Failed to load R2 models.json:", error);
+      this.setStatus("3D previews unavailable; showing images.");
     }
   }
   getProductId(product) {
     return product && product.id ? String(product.id) : "";
   }
   getModelId(product) {
-    if (!this.modelManifestLoaded || !product) {
+    if (!this.modelManifestLoaded || !product)
       return "";
-    }
     const id = this.getProductId(product);
     return this.availableModelIds.has(id) ? id : "";
   }
@@ -67489,10 +67467,7 @@ var ARMenuManager = class extends Component3 {
       return;
     index = Math.max(
       0,
-      Math.min(
-        index,
-        this.filteredProducts.length - 1
-      )
+      Math.min(index, this.filteredProducts.length - 1)
     );
     this.currentIndex = index;
     this.currentProduct = this.filteredProducts[index];
@@ -67507,16 +67482,10 @@ var ARMenuManager = class extends Component3 {
         product.img ? "3D preview unavailable; showing product image." : "Showing placeholder image."
       );
       this.dispatchModelReady(product, false);
-      this.startRestaurantPreload();
       return;
     }
     this.setStatus("Loading 3D model...");
     try {
-      if (this.preloadWorkerRunning && !this.modelLoads.has(modelId) && this.preloadWorkerPromise) {
-        await this.preloadWorkerPromise;
-      }
-      if (requestId !== this.modelRequestId)
-        return;
       const prefab = await this.ensurePrefab(product);
       if (requestId !== this.modelRequestId)
         return;
@@ -67532,11 +67501,7 @@ var ARMenuManager = class extends Component3 {
       this.setStatus("");
       this.dispatchModelReady(product, true);
     } catch (error) {
-      console.error(
-        "Failed to display GLB:",
-        modelId,
-        error
-      );
+      console.error("Failed to display GLB:", modelId, error);
       if (requestId === this.modelRequestId) {
         this.showImageFallback(product.img);
         this.setStatus(
@@ -67545,23 +67510,17 @@ var ARMenuManager = class extends Component3 {
         this.dispatchModelReady(product, false);
       }
     }
-    this.startRestaurantPreload();
   }
   /* GLTF PREFAB CACHE */
   ensurePrefab(product) {
     const modelId = this.getModelId(product);
     if (!modelId) {
       return Promise.reject(
-        new Error(
-          "No registered GLB for this product"
-        )
+        new Error("No registered GLB for this product")
       );
     }
     if (this.modelPrefabs.has(modelId)) {
-      const cached = this.modelPrefabs.get(modelId);
-      this.modelPrefabs.delete(modelId);
-      this.modelPrefabs.set(modelId, cached);
-      return Promise.resolve(cached);
+      return Promise.resolve(this.modelPrefabs.get(modelId));
     }
     if (this.modelLoads.has(modelId)) {
       return this.modelLoads.get(modelId);
@@ -67570,8 +67529,6 @@ var ARMenuManager = class extends Component3 {
     console.log("Loading GLB:", modelId, url);
     const promise = this.engine.loadGLTF({ url }).then((prefab) => {
       this.modelPrefabs.set(modelId, prefab);
-      this.trimPrefabCache();
-      console.log("GLB loaded:", modelId);
       return prefab;
     }).finally(() => {
       this.modelLoads.delete(modelId);
@@ -67579,60 +67536,38 @@ var ARMenuManager = class extends Component3 {
     this.modelLoads.set(modelId, promise);
     return promise;
   }
-  trimPrefabCache() {
-    while (this.modelPrefabs.size > this.maxCachedPrefabs) {
-      let removed = false;
-      for (const id of this.modelPrefabs.keys()) {
-        if (id === this.activeModelId)
-          continue;
-        if (this.currentProduct && id === this.getModelId(this.currentProduct)) {
-          continue;
-        }
-        this.modelPrefabs.delete(id);
-        removed = true;
-        break;
-      }
-      if (!removed)
-        break;
-    }
-  }
-  /* SEQUENTIAL BACKGROUND PRELOADING */
+  /* BACKGROUND PRELOADING */
   startRestaurantPreload() {
-    if (!this.modelManifestLoaded || this.preloadWorkerRunning) {
+    if (!this.modelManifestLoaded)
       return;
-    }
-    for (let i = this.currentIndex + 1; i < this.filteredProducts.length; i++) {
-      const product = this.filteredProducts[i];
+    const upcoming = this.filteredProducts.slice(
+      this.currentIndex + 1,
+      this.currentIndex + 3
+    );
+    for (const product of upcoming) {
       const id = this.getModelId(product);
-      if (!id || this.modelPrefabs.has(id) || this.modelLoads.has(id)) {
+      if (!id || this.modelPrefabs.has(id) || this.modelLoads.has(id) || this.preloadQueuedIds.has(id)) {
         continue;
       }
-      if (this.preloadQueuedIds.has(id))
-        return;
-      this.preloadQueue = [product];
-      this.preloadQueuedIds.clear();
+      this.preloadQueue.push(product);
       this.preloadQueuedIds.add(id);
-      this.pumpPreloadQueue();
-      return;
     }
+    this.pumpPreloadQueue();
   }
   pumpPreloadQueue() {
-    if (this.preloadWorkerRunning || !this.preloadQueue.length) {
+    if (this.preloadWorkerRunning)
       return;
-    }
     this.preloadWorkerRunning = true;
     const run = async () => {
       try {
-        const product = this.preloadQueue.shift();
-        const id = this.getModelId(product);
-        this.preloadQueuedIds.delete(id);
-        if (id && !this.modelPrefabs.has(id)) {
+        while (this.preloadQueue.length) {
+          const product = this.preloadQueue.shift();
+          const id = this.getModelId(product);
+          this.preloadQueuedIds.delete(id);
+          if (!id || this.modelPrefabs.has(id))
+            continue;
           try {
             await this.ensurePrefab(product);
-            console.log(
-              "Preloaded GLB:",
-              id
-            );
           } catch (error) {
             console.warn(
               "Background preload failed:",
@@ -67643,10 +67578,12 @@ var ARMenuManager = class extends Component3 {
         }
       } finally {
         this.preloadWorkerRunning = false;
-        this.preloadWorkerPromise = null;
+        if (this.preloadQueue.length) {
+          this.pumpPreloadQueue();
+        }
       }
     };
-    this.preloadWorkerPromise = run();
+    run();
   }
   dispatchModelReady(product, available) {
     window.dispatchEvent(
@@ -67673,17 +67610,13 @@ var ARMenuManager = class extends Component3 {
         root.destroy();
       }
     } catch (error) {
-      console.warn(
-        "Could not remove previous model:",
-        error
-      );
+      console.warn("Could not remove previous model:", error);
     }
   }
   /* MODEL ORIENTATION AND PLACEMENT */
   applyModelOrientation(root) {
-    if (!root || typeof root.setRotationLocal !== "function") {
+    if (!root || typeof root.setRotationLocal !== "function")
       return;
-    }
     const degrees = Number(this.modelRotationXDegrees) || 0;
     const halfAngle = degrees * Math.PI / 360;
     root.setRotationLocal([
@@ -67699,17 +67632,12 @@ var ARMenuManager = class extends Component3 {
     this.applyModelOrientation(root);
     root.setTranslationLocal([0, 0.01, 0]);
     const scale7 = this.modelScale * this.currentScaleFactor;
-    root.setScalingLocal([
-      scale7,
-      scale7,
-      scale7
-    ]);
+    root.setScalingLocal([scale7, scale7, scale7]);
   }
   /* ROTATION */
   update(dt) {
-    if (!this.isRotating || !this.activeModelRoot) {
+    if (!this.isRotating || !this.activeModelRoot)
       return;
-    }
     const angle2 = this.rotateSpeed * dt * Math.PI / 180;
     this.activeModelRoot.rotateAxisAngleRadObject(
       [0, 1, 0],
@@ -67717,9 +67645,8 @@ var ARMenuManager = class extends Component3 {
     );
   }
   startRotation() {
-    if (this.activeModelRoot) {
+    if (this.activeModelRoot)
       this.isRotating = true;
-    }
   }
   stopRotation() {
     this.isRotating = false;
@@ -67744,28 +67671,21 @@ var ARMenuManager = class extends Component3 {
       2: "zoom-x2"
     };
     const activeButton = document.getElementById(ids[factor]);
-    if (activeButton) {
+    if (activeButton)
       activeButton.classList.add("active");
-    }
   }
   applyScaleToCurrent() {
     if (!this.activeModelRoot)
       return;
     const scale7 = this.modelScale * this.currentScaleFactor;
-    this.activeModelRoot.setScalingLocal([
-      scale7,
-      scale7,
-      scale7
-    ]);
+    this.activeModelRoot.setScalingLocal([scale7, scale7, scale7]);
   }
   /* IMAGE FALLBACK */
   showImageFallback(url) {
     const container = document.getElementById(
       "product-image-container"
     );
-    const image2 = document.getElementById(
-      "product-image"
-    );
+    const image2 = document.getElementById("product-image");
     if (!container || !image2)
       return;
     const productImage = String(url || "").trim();
@@ -67801,9 +67721,8 @@ var ARMenuManager = class extends Component3 {
     const container = document.getElementById(
       "product-image-container"
     );
-    if (container) {
+    if (container)
       container.style.display = "none";
-    }
   }
   /* SWIPE NAVIGATION */
   setupSwipeNavigation() {
@@ -67818,73 +67737,58 @@ var ARMenuManager = class extends Component3 {
         )
       );
     };
-    window.addEventListener(
-      "pointerdown",
-      (event) => {
-        if (event.pointerType === "mouse" && event.button !== 0) {
-          this.swipeStart = null;
-          return;
-        }
-        if (isUI(event.target)) {
-          this.swipeStart = null;
-          return;
-        }
-        this.swipeStart = {
-          x: event.clientX,
-          y: event.clientY,
-          pointerId: event.pointerId
-        };
-      },
-      { passive: true }
-    );
-    window.addEventListener(
-      "pointerup",
-      (event) => {
-        if (!this.swipeStart)
-          return;
-        const start = this.swipeStart;
+    window.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse" && event.button !== 0) {
         this.swipeStart = null;
-        if (start.pointerId !== event.pointerId) {
-          return;
-        }
-        if (isUI(event.target))
-          return;
-        const dx = event.clientX - start.x;
-        const dy = event.clientY - start.y;
-        if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy) * 1.3) {
-          return;
-        }
-        if (dx < 0) {
-          this.next();
-        } else {
-          this.prev();
-        }
-      },
-      { passive: true }
-    );
-    window.addEventListener(
-      "pointercancel",
-      () => {
+        return;
+      }
+      if (isUI(event.target)) {
         this.swipeStart = null;
-      },
-      { passive: true }
-    );
+        return;
+      }
+      this.swipeStart = {
+        x: event.clientX,
+        y: event.clientY,
+        pointerId: event.pointerId
+      };
+    }, { passive: true });
+    window.addEventListener("pointerup", (event) => {
+      if (!this.swipeStart)
+        return;
+      const start = this.swipeStart;
+      this.swipeStart = null;
+      if (start.pointerId !== event.pointerId)
+        return;
+      if (isUI(event.target))
+        return;
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy) * 1.3) {
+        return;
+      }
+      if (dx < 0) {
+        this.next();
+      } else {
+        this.prev();
+      }
+    }, { passive: true });
+    window.addEventListener("pointercancel", () => {
+      this.swipeStart = null;
+    }, { passive: true });
   }
   /* STATUS AND PRICE */
   setStatus(message) {
     const element = document.getElementById("menu-status");
-    if (element) {
+    if (element)
       element.textContent = message || "";
-    }
   }
   formatPrice(price) {
     if (price === null || price === void 0 || price === "") {
       return "\u2014";
     }
     const number = Number(price);
-    if (Number.isNaN(number)) {
+    if (Number.isNaN(number))
       return String(price);
-    }
     return new Intl.NumberFormat("en-NG", {
       style: "currency",
       currency: "NGN",
@@ -67898,28 +67802,21 @@ var ARMenuManager = class extends Component3 {
     const price = document.getElementById("product-price");
     const counter = document.getElementById("product-counter");
     if (!product) {
-      if (title) {
+      if (title)
         title.textContent = "No products found";
-      }
-      if (description) {
+      if (description)
         description.textContent = "";
-      }
-      if (price) {
+      if (price)
         price.textContent = "";
-      }
-      if (counter) {
+      if (counter)
         counter.textContent = "0 items";
-      }
     } else {
-      if (title) {
+      if (title)
         title.textContent = product.name;
-      }
-      if (description) {
+      if (description)
         description.textContent = product.desc;
-      }
-      if (price) {
+      if (price)
         price.textContent = this.formatPrice(product.price);
-      }
       if (counter) {
         counter.textContent = this.currentIndex + 1 + " of " + this.filteredProducts.length;
       }
@@ -67949,9 +67846,7 @@ var ARMenuManager = class extends Component3 {
   /* UI CREATION */
   createUI() {
     document.getElementById("model-ui-root")?.remove();
-    document.getElementById(
-      "product-image-container"
-    )?.remove();
+    document.getElementById("product-image-container")?.remove();
     const imageContainer = document.createElement("div");
     imageContainer.id = "product-image-container";
     imageContainer.style.cssText = "position:fixed;top:4%;left:50%;transform:translateX(-50%);z-index:9998;display:none;width:96vw;max-width:900px;height:58vh;max-height:650px;border-radius:20px;overflow:hidden;background:rgba(0,0,0,.35);pointer-events:none;";
@@ -68003,9 +67898,7 @@ var ARMenuManager = class extends Component3 {
     modelFilterToggle.checked = this.only3DModels;
     modelFilterToggle.style.cssText = "width:17px;height:17px;accent-color:#16a34a;";
     modelFilterToggle.onchange = () => {
-      this.setOnly3DModels(
-        modelFilterToggle.checked
-      );
+      this.setOnly3DModels(modelFilterToggle.checked);
     };
     const modelFilterText = document.createElement("span");
     modelFilterText.textContent = "3D models only";
@@ -68044,23 +67937,15 @@ var ARMenuManager = class extends Component3 {
     controls.appendChild(
       makeButton("Next \u25B6", () => this.next())
     );
-    const rotateButton = makeButton(
-      "\u{1F504} Hold to Rotate",
-      () => {
+    const rotateButton = makeButton("\u{1F504} Hold to Rotate", () => {
+    });
+    rotateButton.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      this.startRotation();
+      if (rotateButton.setPointerCapture) {
+        rotateButton.setPointerCapture(event.pointerId);
       }
-    );
-    rotateButton.addEventListener(
-      "pointerdown",
-      (event) => {
-        event.preventDefault();
-        this.startRotation();
-        if (rotateButton.setPointerCapture) {
-          rotateButton.setPointerCapture(
-            event.pointerId
-          );
-        }
-      }
-    );
+    });
     rotateButton.addEventListener(
       "pointerup",
       () => this.stopRotation()
@@ -68075,27 +67960,15 @@ var ARMenuManager = class extends Component3 {
     );
     controls.appendChild(rotateButton);
     controls.appendChild(
-      makeButton(
-        "Zoom \u2212",
-        () => this.setZoom(0.5),
-        "zoom-btn"
-      )
+      makeButton("Zoom \u2212", () => this.setZoom(0.5), "zoom-btn")
     );
     controls.lastChild.id = "zoom-x05";
     controls.appendChild(
-      makeButton(
-        "Zoom 1\xD7",
-        () => this.setZoom(1),
-        "zoom-btn"
-      )
+      makeButton("Zoom 1\xD7", () => this.setZoom(1), "zoom-btn")
     );
     controls.lastChild.id = "zoom-x1";
     controls.appendChild(
-      makeButton(
-        "Zoom +",
-        () => this.setZoom(2),
-        "zoom-btn"
-      )
+      makeButton("Zoom +", () => this.setZoom(2), "zoom-btn")
     );
     controls.lastChild.id = "zoom-x2";
     root.appendChild(controls);
